@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 
 interface CurriculumGraphProps {
   onNavigate: (screen: string) => void
@@ -69,6 +69,60 @@ interface SelectedNodeInfo {
   state: NodeState
 }
 
+function AddTopicModal({ onClose, onAdd }: { onClose: () => void; onAdd: (name: string) => void }) {
+  const [topicName, setTopicName] = useState('')
+  const [withSuggestions, setWithSuggestions] = useState(false)
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+      <div className="bg-white border border-[#E3E0D8] rounded-xl shadow-2xl w-[420px] p-6 screen-enter">
+        <div className="flex items-center justify-between mb-5">
+          <h2 className="font-display text-xl font-medium text-[#1A1916]">Add to Learning Path</h2>
+          <button onClick={onClose} className="text-[#A8A5A0] hover:text-[#1A1916] text-xl transition-colors">×</button>
+        </div>
+        <div className="mb-4">
+          <label className="text-xs font-medium text-[#7A7870] uppercase tracking-wide block mb-1.5">Topic name</label>
+          <input
+            value={topicName}
+            onChange={e => setTopicName(e.target.value)}
+            autoFocus
+            placeholder="e.g. Support Vector Machines"
+            className="w-full border border-[#E3E0D8] rounded-lg px-4 py-3 text-sm text-[#1A1916] placeholder:text-[#C0BDB5] outline-none focus:border-[#9B9890] transition-all"
+          />
+        </div>
+        <div className="bg-[#F7F6F2] border border-[#E3E0D8] rounded-lg p-3 mb-4">
+          <p className="text-xs text-[#A8A5A0] mb-1">Where</p>
+          <div className="flex items-center gap-1.5 text-xs text-[#5A5850]">
+            <span>Machine Learning</span>
+            <span className="text-[#C0BDB5]">›</span>
+            <span className="font-medium text-[#1A1916]">Supervised Learning</span>
+          </div>
+        </div>
+        <label className="flex items-center gap-2.5 cursor-pointer mb-5">
+          <div
+            onClick={() => setWithSuggestions(!withSuggestions)}
+            className={`w-4 h-4 rounded border flex items-center justify-center transition-all ${withSuggestions ? 'bg-[#5B7A58] border-[#5B7A58]' : 'border-[#C0BDB5]'}`}
+          >
+            {withSuggestions && <span className="text-white text-[9px]">✓</span>}
+          </div>
+          <span className="text-sm text-[#3D3C38]">Ask Trellis to suggest prerequisites</span>
+        </label>
+        <div className="flex gap-2">
+          <button onClick={onClose} className="flex-1 border border-[#E3E0D8] text-[#3D3C38] text-sm py-2.5 rounded-lg hover:bg-[#F0EEE9] transition-all">
+            Cancel
+          </button>
+          <button
+            disabled={!topicName.trim()}
+            onClick={() => { onAdd(topicName); onClose() }}
+            className="flex-1 bg-[#2D2C28] text-white text-sm py-2.5 rounded-lg hover:bg-[#1A1916] transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+          >
+            Add Topic
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function CurriculumGraph({ onNavigate }: CurriculumGraphProps) {
   const [view, setView] = useState<'graph' | 'list'>('graph')
   const [selectedNode, setSelectedNode] = useState<SelectedNodeInfo | null>({
@@ -77,8 +131,14 @@ export default function CurriculumGraph({ onNavigate }: CurriculumGraphProps) {
     state: 'current',
   })
   const [scale, setScale] = useState(1)
+  const [editMode, setEditMode] = useState(false)
+  const [showAddTopic, setShowAddTopic] = useState(false)
+  const [unsavedChanges, setUnsavedChanges] = useState(false)
+  const [localNodes, setLocalNodes] = useState(nodes)
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _ref = useRef(null)
 
-  const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]))
+  const nodeMap = Object.fromEntries(localNodes.map(n => [n.id, n]))
 
   const prerequisites: Record<string, string[]> = {
     logreg: ['Linear Algebra', 'Probability', 'Linear Regression'],
@@ -108,12 +168,42 @@ export default function CurriculumGraph({ onNavigate }: CurriculumGraphProps) {
           <p className="text-sm text-[#7A7870] mt-1">18 completed · 3 in progress · 5 threads explored</p>
         </div>
         <div className="flex items-center gap-2">
-          <button className="text-xs text-[#7A7870] border border-[#E3E0D8] px-3 py-1.5 rounded-md hover:bg-white transition-all">
-            Edit Path
-          </button>
-          <button className="text-xs text-[#7A7870] border border-[#E3E0D8] px-3 py-1.5 rounded-md hover:bg-white transition-all">
-            + Add Topic
-          </button>
+          {editMode ? (
+            <>
+              {unsavedChanges && (
+                <span className="text-xs text-[#A8954E] bg-[#FAF5EA] border border-[#E8D9AA] px-2.5 py-1 rounded-md">
+                  Unsaved changes
+                </span>
+              )}
+              <button
+                onClick={() => { setEditMode(false); setUnsavedChanges(false); setLocalNodes(nodes) }}
+                className="text-xs text-[#7A7870] border border-[#E3E0D8] px-3 py-1.5 rounded-md hover:bg-white transition-all"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setEditMode(false); setUnsavedChanges(false) }}
+                className="text-xs bg-[#2D2C28] text-white px-3 py-1.5 rounded-md hover:bg-[#1A1916] transition-colors"
+              >
+                Save Changes
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => setEditMode(true)}
+                className="text-xs text-[#7A7870] border border-[#E3E0D8] px-3 py-1.5 rounded-md hover:bg-white transition-all"
+              >
+                Edit Path
+              </button>
+              <button
+                onClick={() => setShowAddTopic(true)}
+                className="text-xs text-[#7A7870] border border-[#E3E0D8] px-3 py-1.5 rounded-md hover:bg-white transition-all"
+              >
+                + Add Topic
+              </button>
+            </>
+          )}
         </div>
       </div>
 
@@ -206,7 +296,7 @@ export default function CurriculumGraph({ onNavigate }: CurriculumGraphProps) {
                 })}
 
                 {/* Nodes */}
-                {nodes.map(node => {
+                {localNodes.map(node => {
                   const style = getNodeStyle(node.state)
                   const isRoot = node.id === 'root'
                   const isSelected = selectedNode?.id === node.id
@@ -363,6 +453,63 @@ export default function CurriculumGraph({ onNavigate }: CurriculumGraphProps) {
           </div>
         )}
       </div>
+
+      {/* Edit mode panel */}
+      {editMode && (
+        <div className="mt-4 bg-white border border-[#E3E0D8] rounded-xl p-5 screen-enter">
+          <p className="text-xs font-medium text-[#7A7870] uppercase tracking-widest mb-3">Edit Curriculum</p>
+          <div className="grid grid-cols-2 gap-3">
+            {['foundations','math','supervised','evaluation'].map((grpId, gi) => {
+              const grpName = ['Foundations', 'Mathematics', 'Supervised Learning', 'Model Evaluation'][gi]
+              const grpNodes = localNodes.filter(n => n.group === grpId)
+              return (
+                <div key={grpId} className="border border-[#F0EEE9] rounded-lg p-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-sm font-medium text-[#1A1916]">{grpName}</p>
+                    <button className="text-xs text-[#A8A5A0] hover:text-[#7A7870]">Rename</button>
+                  </div>
+                  <div className="space-y-1">
+                    {grpNodes.map(n => (
+                      <div key={n.id} className="flex items-center gap-2 group/node">
+                        <span className="text-[#C0BDB5] cursor-grab text-xs">⋮⋮</span>
+                        <span className="text-xs text-[#5A5850] flex-1">{n.label}</span>
+                        <button
+                          onClick={() => { setLocalNodes(prev => prev.filter(x => x.id !== n.id)); setUnsavedChanges(true) }}
+                          className="text-xs text-[#C0BDB5] hover:text-[#A8554E] opacity-0 group-hover/node:opacity-100 transition-opacity"
+                        >×</button>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => setShowAddTopic(true)}
+                      className="flex items-center gap-1 text-xs text-[#5B7A58] hover:text-[#3D6039] mt-1 transition-colors"
+                    >
+                      + Add Topic
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {showAddTopic && (
+        <AddTopicModal
+          onClose={() => setShowAddTopic(false)}
+          onAdd={(name) => {
+            setLocalNodes(prev => [...prev, {
+              id: `custom-${Date.now()}`,
+              label: name,
+              x: 560,
+              y: 370,
+              state: 'available' as NodeState,
+              parent: 'supervised',
+              group: 'supervised',
+            }])
+            setUnsavedChanges(true)
+          }}
+        />
+      )}
     </div>
   )
 }

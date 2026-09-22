@@ -1,5 +1,77 @@
 import { useState } from 'react'
 
+function ExportModal({ onClose }: { onClose: () => void }) {
+  const [exported, setExported] = useState(false)
+  const [options, setOptions] = useState({
+    selectedNotes: true,
+    sources: true,
+    sessionSummary: true,
+    threads: true,
+    fullNode: false,
+  })
+
+  const toggleOption = (key: keyof typeof options) => setOptions(o => ({ ...o, [key]: !o[key] }))
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
+      <div className="bg-white border border-[#E3E0D8] rounded-xl shadow-2xl w-[440px] p-6 screen-enter">
+        {exported ? (
+          <div className="text-center py-4">
+            <div className="w-10 h-10 rounded-full bg-[#EFF4EE] border border-[#C5D9C4] flex items-center justify-center mx-auto mb-3">
+              <span className="text-[#5B7A58]">✓</span>
+            </div>
+            <h2 className="font-display text-xl font-medium text-[#1A1916] mb-1">PDF prepared</h2>
+            <p className="text-sm text-[#7A7870] mb-5">Machine Learning Notes · 12 pages</p>
+            <button onClick={onClose} className="bg-[#2D2C28] text-white text-sm px-6 py-2.5 rounded-lg hover:bg-[#1A1916] transition-colors">
+              Done
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="font-display text-xl font-medium text-[#1A1916]">Export Study Material</h2>
+              <button onClick={onClose} className="text-[#A8A5A0] hover:text-[#1A1916] text-xl transition-colors">×</button>
+            </div>
+            <p className="text-xs font-medium text-[#7A7870] uppercase tracking-wide mb-3">Include</p>
+            <div className="space-y-2 mb-5">
+              {(Object.entries({
+                selectedNotes: 'Selected notes',
+                sources: 'Sources',
+                sessionSummary: 'Study session summary',
+                threads: 'Exploratory threads',
+                fullNode: 'Full learning node',
+              }) as [keyof typeof options, string][]).map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2.5 cursor-pointer">
+                  <div
+                    onClick={() => toggleOption(key)}
+                    className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-all ${options[key] ? 'bg-[#5B7A58] border-[#5B7A58]' : 'border-[#C0BDB5]'}`}
+                  >
+                    {options[key] && <span className="text-white text-[9px]">✓</span>}
+                  </div>
+                  <span className="text-sm text-[#3D3C38]">{label}</span>
+                </label>
+              ))}
+            </div>
+            <div className="bg-[#F7F6F2] border border-[#E3E0D8] rounded-lg p-3 mb-5">
+              <p className="text-xs text-[#A8A5A0] mb-2">Preview</p>
+              <p className="text-sm font-medium text-[#1A1916]">Machine Learning</p>
+              <p className="text-xs text-[#7A7870]">Logistic Regression · est. 12 pages</p>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={onClose} className="flex-1 border border-[#E3E0D8] text-[#3D3C38] text-sm py-2.5 rounded-lg hover:bg-[#F0EEE9] transition-all">
+                Cancel
+              </button>
+              <button onClick={() => setExported(true)} className="flex-1 bg-[#2D2C28] text-white text-sm py-2.5 rounded-lg hover:bg-[#1A1916] transition-colors">
+                Export PDF
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const categories = ['All Notes', 'Machine Learning', 'Saved Explanations', 'Examples', 'Study Sessions']
 
 interface NotebookEntry {
@@ -60,6 +132,7 @@ export default function Notebook() {
   const [activeCategory, setActiveCategory] = useState('All Notes')
   const [selectedEntry, setSelectedEntry] = useState<NotebookEntry>(entries[0])
   const [search, setSearch] = useState('')
+  const [showExport, setShowExport] = useState(false)
 
   const filtered = entries.filter(e => {
     const matchCat = activeCategory === 'All Notes' || e.category === activeCategory || e.type === activeCategory.toLowerCase()
@@ -76,6 +149,7 @@ export default function Notebook() {
 
   return (
     <div className="screen-enter flex h-[calc(100vh-4rem)] gap-0">
+      {showExport && <ExportModal onClose={() => setShowExport(false)} />}
       {/* Sidebar */}
       <div className="w-52 flex-shrink-0 border-r border-[#E3E0D8] pr-5">
         <div className="mb-5">
@@ -125,7 +199,7 @@ export default function Notebook() {
       <div className="w-64 flex-shrink-0 border-r border-[#E3E0D8] px-4 overflow-y-auto">
         <div className="flex items-center justify-between py-3 mb-1 sticky top-0 bg-[#F7F6F2]">
           <span className="text-xs text-[#A8A5A0]">{filtered.length} entries</span>
-          <button className="text-xs text-[#A8A5A0] hover:text-[#7A7870]">Export PDF</button>
+          <button onClick={() => setShowExport(true)} className="text-xs text-[#A8A5A0] hover:text-[#7A7870] transition-colors">Export PDF</button>
         </div>
         <div className="space-y-1.5">
           {filtered.map(entry => (
@@ -168,7 +242,7 @@ export default function Notebook() {
             </div>
             <div className="flex gap-2 flex-shrink-0 ml-4">
               <button className="text-xs border border-[#E3E0D8] text-[#7A7870] px-3 py-1.5 rounded-md hover:bg-white transition-all">Edit</button>
-              <button className="text-xs border border-[#E3E0D8] text-[#7A7870] px-3 py-1.5 rounded-md hover:bg-white transition-all">Export PDF</button>
+              <button onClick={() => setShowExport(true)} className="text-xs border border-[#E3E0D8] text-[#7A7870] px-3 py-1.5 rounded-md hover:bg-white transition-all">Export PDF</button>
             </div>
           </div>
 

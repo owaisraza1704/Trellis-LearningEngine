@@ -95,12 +95,20 @@ export default function Dashboard({ onNavigate }: DashboardProps) {
             <span className="text-[#1A1916] font-medium">Continue with Logistic Regression</span>
             <span className="text-[#A8A5A0]">· last studied 2 hours ago</span>
           </div>
-          <button
-            onClick={(e) => { e.stopPropagation(); onNavigate('node') }}
-            className="text-xs bg-[#2D2C28] text-white px-4 py-2 rounded-md opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5"
-          >
-            Continue <span>→</span>
-          </button>
+          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={(e) => { e.stopPropagation(); onNavigate('session') }}
+              className="text-xs text-[#7A7870] border border-[#E3E0D8] px-3 py-2 rounded-md hover:bg-[#F0EEE9] transition-all"
+            >
+              View session
+            </button>
+            <button
+              onClick={(e) => { e.stopPropagation(); onNavigate('node') }}
+              className="text-xs bg-[#2D2C28] text-white px-4 py-2 rounded-md flex items-center gap-1.5"
+            >
+              Continue <span>→</span>
+            </button>
+          </div>
         </div>
       </div>
 
