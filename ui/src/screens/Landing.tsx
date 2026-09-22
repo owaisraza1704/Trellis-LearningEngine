@@ -181,7 +181,7 @@ export default function Landing({ onEnter }: LandingProps) {
                 Explore Demo
               </button>
             </div>
-            <p className="text-xs text-[#A8A5A0] mt-5">No credit card required. Start with any topic.</p>
+            <p className="text-xs text-[#A8A5A0] mt-5">Start with a goal. Build knowledge that stays connected.</p>
           </div>
 
           {/* Hero visual */}
