@@ -4,23 +4,35 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "next dev --webpack",
+    "build": "next build --webpack",
     "start": "next start",
     "typecheck": "tsc --noEmit",
-    "format": "oxfmt"
+    "format": "prettier --write src tests next.config.ts playwright.config.ts",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
+    "@dagrejs/dagre": "^3.1.1",
+    "@fontsource-variable/fraunces": "^5.3.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@radix-ui/react-dialog": "^1.1.23",
+    "@tanstack/react-query": "^5.103.2",
+    "@xyflow/react": "^12.12.0",
+    "lucide-react": "^1.48.0",
     "next": "^16.3.5",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@tailwindcss/postcss": "^4.3.3",
-    "oxfmt": "^0.2.0",
+    "prettier": "^3.9.9",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.0"
   }

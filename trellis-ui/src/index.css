@@ -1,6 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,300;1,9..144,400&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;450;500;600;700&display=swap');
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&display=swap');
 @import 'tailwindcss';
 
 @theme inline {
@@ -26,22 +23,22 @@
 }
 
 :root {
-  --background: #F7F6F2;
-  --foreground: #1A1916;
-  --card: #FFFFFF;
-  --card-foreground: #1A1916;
-  --primary: #2D2C28;
-  --primary-foreground: #F7F6F2;
-  --secondary: #EEF0EB;
-  --secondary-foreground: #3D3C38;
-  --muted: #F0EEE9;
-  --muted-foreground: #7A7870;
-  --accent: #5B7A58;
-  --accent-foreground: #FFFFFF;
-  --border: #E3E0D8;
-  --ring: #5B7A58;
-  --sage: #5B7A58;
-  --indigo: #4A5FA5;
+  --background: #f7f6f2;
+  --foreground: #1a1916;
+  --card: #ffffff;
+  --card-foreground: #1a1916;
+  --primary: #2d2c28;
+  --primary-foreground: #f7f6f2;
+  --secondary: #eef0eb;
+  --secondary-foreground: #3d3c38;
+  --muted: #f0eee9;
+  --muted-foreground: #7a7870;
+  --accent: #5b7a58;
+  --accent-foreground: #ffffff;
+  --border: #e3e0d8;
+  --ring: #5b7a58;
+  --sage: #5b7a58;
+  --indigo: #4a5fa5;
   --radius: 6px;
 }
 
@@ -49,12 +46,13 @@
   box-sizing: border-box;
 }
 
-html, body {
+html,
+body {
   margin: 0;
   padding: 0;
   background-color: var(--background);
   color: var(--foreground);
-  font-family: 'Inter', sans-serif;
+  font-family: 'Inter Variable', sans-serif;
   font-size: 15px;
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
@@ -68,7 +66,7 @@ html, body {
 }
 
 *:hover {
-  scrollbar-color: #D4D0C8 transparent;
+  scrollbar-color: #d4d0c8 transparent;
 }
 
 ::-webkit-scrollbar {
@@ -86,11 +84,11 @@ html, body {
 }
 
 *:hover::-webkit-scrollbar-thumb {
-  background: #D4D0C8;
+  background: #d4d0c8;
 }
 
 .font-display {
-  font-family: 'Fraunces', serif;
+  font-family: 'Fraunces Variable', serif;
 }
 
 .font-mono {
@@ -103,8 +101,15 @@ html, body {
 }
 
 @keyframes pulse-ring {
-  0%, 100% { opacity: 0.4; transform: scale(1); }
-  50% { opacity: 0.8; transform: scale(1.08); }
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.08);
+  }
 }
 
 /* Smooth transitions */
@@ -113,13 +118,19 @@ html, body {
 }
 
 @keyframes screen-in {
-  from { opacity: 0; transform: translateY(6px); }
-  to { opacity: 1; transform: translateY(0); }
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 /* Prose content styles */
 .prose-trellis h1 {
-  font-family: 'Fraunces', serif;
+  font-family: 'Fraunces Variable', serif;
   font-size: 1.875rem;
   font-weight: 400;
   line-height: 1.2;
@@ -128,7 +139,7 @@ html, body {
 }
 
 .prose-trellis h2 {
-  font-family: 'Fraunces', serif;
+  font-family: 'Fraunces Variable', serif;
   font-size: 1.25rem;
   font-weight: 500;
   line-height: 1.3;
@@ -139,14 +150,14 @@ html, body {
 
 .prose-trellis p {
   margin-bottom: 1rem;
-  color: #3D3C38;
+  color: #3d3c38;
   line-height: 1.75;
 }
 
 .prose-trellis .callout {
   border-left: 2px solid var(--accent);
   padding: 0.75rem 1rem;
-  background: #F0F4EF;
+  background: #f0f4ef;
   border-radius: 0 var(--radius) var(--radius) 0;
   margin: 1rem 0;
 }
@@ -157,7 +168,7 @@ html, body {
   background: var(--muted);
   padding: 0.15em 0.4em;
   border-radius: 3px;
-  color: #2D5A2D;
+  color: #2d5a2d;
 }
 
 .prose-trellis .math-block {
@@ -170,4 +181,144 @@ html, body {
   text-align: center;
   margin: 1rem 0;
   color: var(--foreground);
+}
+
+/* Shared controls follow the original Trellis palette and proportions. */
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+button:not(:disabled),
+select {
+  cursor: pointer;
+}
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+button:focus-visible,
+a:focus-visible {
+  outline: 2px solid #4a5fa5;
+  outline-offset: 3px;
+}
+.btn,
+.btn-secondary,
+.btn-danger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  border-radius: 7px;
+  padding: 0.6rem 0.9rem;
+  font-size: 0.8rem;
+  line-height: 1.3;
+  transition: background 0.15s;
+}
+.btn {
+  background: #2d2c28;
+  color: white;
+  border: 1px solid #2d2c28;
+}
+.btn:hover:not(:disabled) {
+  background: #1a1916;
+}
+.btn-secondary {
+  background: white;
+  color: #5a5850;
+  border: 1px solid #e3e0d8;
+}
+.btn-secondary:hover:not(:disabled) {
+  background: #f0eee9;
+}
+.btn-danger {
+  background: #fff4f1;
+  border: 1px solid #edcec8;
+  color: #a8554e;
+}
+.field {
+  display: block;
+  width: 100%;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid #e3e0d8;
+  border-radius: 7px;
+  background: white;
+  font-size: 0.875rem;
+  color: #1a1916;
+  outline: none;
+}
+.field:focus {
+  border-color: #9b9890;
+  box-shadow: 0 0 0 2px #eae8e3;
+}
+.field-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: #7a7870;
+  margin: 1rem 0 0.4rem;
+}
+.icon-button {
+  padding: 0.4rem;
+  color: #7a7870;
+  border-radius: 5px;
+}
+.icon-button:hover {
+  background: #f0eee9;
+  color: #1a1916;
+}
+.markdown p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.markdown pre {
+  overflow: auto;
+  padding: 1rem;
+  background: #f0eee9;
+  border-radius: 8px;
+  font-size: 0.8rem;
+}
+.markdown a {
+  color: #4a5fa5;
+  text-decoration: underline;
+}
+.markdown ul {
+  list-style: disc;
+  padding-left: 1.5rem;
+  margin: 0.75rem 0;
+}
+.markdown ol {
+  list-style: decimal;
+  padding-left: 1.5rem;
+  margin: 0.75rem 0;
+}
+.markdown table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 0.8rem;
+  margin: 1rem 0;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid #e3e0d8;
+  padding: 0.5rem;
+  text-align: left;
+}
+.markdown blockquote {
+  border-left: 3px solid #c5d9c4;
+  padding-left: 1rem;
+  color: #7a7870;
+}
+input[type='checkbox'] {
+  accent-color: #5b7a58;
+}
+@media (max-width: 900px) {
+  .workspace-sidebar {
+    width: 68px;
+  }
+  .sidebar-label {
+    display: none;
+  }
 }

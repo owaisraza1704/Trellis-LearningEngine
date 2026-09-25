@@ -1,850 +1,760 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import {
+  ArrowLeft,
+  ArrowRight,
+  Bookmark,
+  Check,
+  ChevronRight,
+  CornerUpRight,
+  Plus,
+  RotateCcw,
+  Send,
+} from 'lucide-react'
+import {
+  api,
+  date,
+  type Evidence,
+  type Interaction,
+  type Navigate,
+  type NodeDetail,
+  type NotebookPage,
+  type Thread,
+  type ThreadDetail,
+} from '../lib/api'
+import { Empty, ErrorNotice, Loading, Markdown, Modal, Status } from '../components/ui'
+import SaveToNotebook from '../components/SaveToNotebook'
+import { assessmentText, responseFeedback } from '../lib/response'
 
-interface LearningNodeProps {
-  onNavigate: (screen: string) => void
+export default function LearningNode(props: {
+  nodeId?: string
+  threadId?: string
+  onNavigate: Navigate
+}) {
+  if (!props.nodeId)
+    return (
+      <div className="p-8">
+        <Empty title="Choose a topic to start learning">
+          <button className="btn mt-3" onClick={() => props.onNavigate('graph')}>
+            Open your curriculum
+          </button>
+        </Empty>
+      </div>
+    )
+  return (
+    <NodeWorkspace
+      key={`${props.nodeId}:${props.threadId || 'primary'}`}
+      {...props}
+      nodeId={props.nodeId}
+    />
+  )
 }
 
-type RightPanel = 'ai' | 'notebook' | 'evidence'
-type NodeStatus = 'in-progress' | 'completed'
-
-const sections = ['Concept', 'How It Works', 'Intuition', 'Example', 'Practical Application']
-
-interface Message {
-  role: 'user' | 'ai'
-  content: string
-  evidenceCount?: number
-}
-
-const initialMessages: Message[] = [
-  { role: 'user', content: 'Why does sigmoid work here?' },
-  {
-    role: 'ai',
-    content: 'Because logistic regression needs to transform its output into a probability between 0 and 1. The sigmoid σ(z) = 1/(1+e^−z) maps any real value to (0,1), which makes it ideal for representing class probabilities.\n\nFor a linear combination z = wᵀx + b, applying sigmoid gives P(y=1|x) — the probability the input belongs to the positive class.',
-    evidenceCount: 3,
-  },
-]
-
-const evidenceSources = [
-  { title: 'Introduction to Statistical Learning', type: 'Book', chapter: 'Chapter 4', relevance: 'High', excerpt: '…logistic regression models the probability of a binary response using the logistic function…' },
-  { title: 'Scikit-learn Documentation', type: 'Docs', chapter: null, relevance: 'High', excerpt: '…the default solver for LogisticRegression is lbfgs, which works well for most binary classification tasks…' },
-  { title: 'Ng, A. CS229 Lecture Notes', type: 'Academic', chapter: null, relevance: 'Medium', excerpt: '…we choose g to be the logistic function because it is a natural choice for modeling probabilities…' },
-]
-
-const notebookEntries = [
-  { id: 'n1', title: 'Sigmoid function intuition', source: 'Logistic Regression', time: 'Saved just now' },
-  { id: 'n2', title: 'Why linear algebra matters for ML', source: 'Linear Algebra', time: 'Yesterday' },
-  { id: 'n3', title: 'CAP Theorem explained', source: 'System Design', time: '2 days ago' },
-]
-
-const threads = [
-  { id: 't1', title: 'History of Logistic Regression', parent: 'Logistic Regression', time: '11 min ago', status: 'exploring' },
-  { id: 't2', title: 'Why sigmoid works', parent: 'Logistic Regression', time: '32 min ago', status: 'saved' },
-  { id: 't3', title: 'Neural Networks connection', parent: 'Logistic Regression', time: 'Yesterday', status: 'saved' },
-]
-
-function Toast({ message, onClose }: { message: string; onClose: () => void }) {
+function NodeWorkspace({
+  nodeId,
+  threadId,
+  onNavigate,
+}: {
+  nodeId: string
+  threadId?: string
+  onNavigate: Navigate
+}) {
+  const client = useQueryClient()
+  const [prompt, setPrompt] = useState('')
+  const [rightPanel, setRightPanel] = useState('ai')
+  const [selected, setSelected] = useState<string | null>(null)
+  const readingKey = `trellis:reading:${nodeId}:${threadId || 'primary'}`
   useEffect(() => {
-    const t = setTimeout(onClose, 3500)
-    return () => clearTimeout(t)
-  }, [onClose])
-  return (
-    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 bg-[#2D2C28] text-white px-4 py-3 rounded-xl shadow-xl screen-enter text-sm">
-      <span className="text-[#5B7A58] text-base">✓</span>
-      <div>
-        <p className="font-medium">{message}</p>
-        <p className="text-xs text-[#9B9890]">Logistic Regression · Current Node</p>
+    setSelected(localStorage.getItem(readingKey))
+  }, [readingKey])
+  useEffect(() => {
+    if (selected) localStorage.setItem(readingKey, selected)
+  }, [readingKey, selected])
+  const [threadTitle, setThreadTitle] = useState('')
+  const [creatingThread, setCreatingThread] = useState(false)
+  const [savePayload, setSavePayload] = useState<{
+    interaction_id?: string
+    evidence_id?: string
+    title?: string
+  } | null>(null)
+  const [saved, setSaved] = useState(false)
+  const messagesEnd = useRef<HTMLDivElement>(null)
+  const node = useQuery({
+    queryKey: ['node', nodeId],
+    queryFn: () => api<NodeDetail>(`/nodes/${nodeId}`),
+  })
+  const thread = useQuery({
+    queryKey: ['thread', threadId],
+    queryFn: () => api<ThreadDetail>(`/threads/${threadId}`),
+    enabled: !!threadId,
+  })
+  const notebook = useQuery({
+    queryKey: ['notebook', node.data?.path.id],
+    queryFn: () =>
+      api<NotebookPage[]>(`/notebook/pages?path_id=${encodeURIComponent(node.data!.path.id)}`),
+    enabled: rightPanel === 'notebook' && !!node.data?.path.id,
+  })
+  const interactions = threadId ? thread.data?.interactions || [] : node.data?.interactions || []
+  const active =
+    interactions.find((item) => item.id === selected) || interactions[interactions.length - 1]
+  const send = useMutation({
+    mutationFn: ({ text, action = 'question' }: { text: string; action?: string }) =>
+      api<Interaction>(
+        threadId ? `/threads/${threadId}/interactions` : `/nodes/${nodeId}/interactions`,
+        'POST',
+        { prompt: text, action },
+      ),
+    onSuccess: (data) => {
+      setPrompt('')
+      setSelected(data.id)
+      client.invalidateQueries({
+        queryKey: [threadId ? 'thread' : 'node', threadId || nodeId],
+      })
+      client.invalidateQueries({ queryKey: ['history'] })
+      client.invalidateQueries({ queryKey: ['workspace'] })
+    },
+  })
+  const update = useMutation({
+    mutationFn: ({ path, body }: { path: string; body: unknown }) => api(path, 'PATCH', body),
+    onSuccess: () => client.invalidateQueries(),
+  })
+  const createThread = useMutation({
+    mutationFn: () =>
+      api<Thread>(`/nodes/${nodeId}/threads`, 'POST', {
+        title: threadTitle,
+        interaction_id: threadId ? undefined : active?.id,
+      }),
+    onSuccess: (data) => {
+      setCreatingThread(false)
+      client.invalidateQueries({ queryKey: ['node', nodeId] })
+      onNavigate('node', {
+        path_id: data.path_id,
+        node_id: nodeId,
+        thread_id: data.id,
+      })
+    },
+  })
+  useEffect(() => {
+    messagesEnd.current?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'nearest',
+    })
+  }, [interactions.length, send.isPending])
+  if (node.isPending || (threadId && thread.isPending))
+    return (
+      <div className="p-8">
+        <Loading />
       </div>
-      <button
-        onClick={() => {}}
-        className="ml-3 text-xs text-[#9B9890] border border-[#4A4A46] px-2.5 py-1 rounded hover:border-[#7A7870] hover:text-white transition-all"
-      >
-        Open Notebook
-      </button>
-    </div>
-  )
-}
-
-function ContextPopover({ onClose }: { onClose: () => void }) {
-  return (
-    <div className="absolute top-8 right-0 z-30 w-72 bg-white border border-[#E3E0D8] rounded-xl shadow-lg p-4 screen-enter">
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-xs font-medium text-[#1A1916] uppercase tracking-widest">Current AI Context</p>
-        <button onClick={onClose} className="text-[#A8A5A0] hover:text-[#1A1916] transition-colors text-sm">×</button>
+    )
+  if (!node.data || (threadId && !thread.data))
+    return (
+      <div className="p-8">
+        <ErrorNotice error={node.error || thread.error} />
       </div>
-      <div className="space-y-3 mb-4">
-        {[
-          { label: 'Journey', value: 'Machine Learning' },
-          { label: 'Parent', value: 'Supervised Learning' },
-          { label: 'Current Node', value: 'Logistic Regression' },
-        ].map((row, i) => (
-          <div key={i} className="flex justify-between text-sm">
-            <span className="text-[#7A7870]">{row.label}</span>
-            <span className="text-[#1A1916] font-medium">{row.value}</span>
-          </div>
-        ))}
-      </div>
-      <div className="border-t border-[#F0EEE9] pt-3 mb-3">
-        <p className="text-xs text-[#7A7870] mb-2">Prerequisites included</p>
-        <div className="space-y-1">
-          {['Linear Algebra', 'Probability', 'Linear Regression'].map((p, i) => (
-            <div key={i} className="flex items-center gap-1.5 text-xs text-[#5A5850]">
-              <span className="text-[#5B7A58]">✓</span> {p}
-            </div>
-          ))}
-        </div>
-      </div>
-      <div className="bg-[#F0EEE9] rounded-lg p-3 mb-3">
-        <div className="flex items-center gap-1.5 mb-1">
-          <span className="w-1.5 h-1.5 rounded-full bg-[#4A5FA5] inline-block"></span>
-          <p className="text-xs font-medium text-[#4A5FA5]">AI Scope: Current Node</p>
-        </div>
-        <p className="text-xs text-[#7A7870] leading-relaxed">
-          The assistant uses this node and prerequisite context. Exploratory threads are kept isolated from the primary path.
-        </p>
-      </div>
-      <div className="flex gap-2">
-        <button className="flex-1 text-xs border border-[#E3E0D8] text-[#3D3C38] py-2 rounded-md hover:bg-[#F0EEE9] transition-all">
-          Manage Scope
-        </button>
-        <button className="flex-1 text-xs bg-[#2D2C28] text-white py-2 rounded-md hover:bg-[#1A1916] transition-colors">
-          View Context
-        </button>
-      </div>
-    </div>
-  )
-}
-
-function AiPanel({ onSaveToNotebook }: { onSaveToNotebook: () => void }) {
-  const [messages, setMessages] = useState<Message[]>(initialMessages)
-  const [input, setInput] = useState('')
-  const [showEvidence, setShowEvidence] = useState(false)
-  const [showContext, setShowContext] = useState(false)
-
-  function send() {
-    if (!input.trim()) return
-    setMessages(m => [...m, { role: 'user', content: input }])
-    setInput('')
-    setTimeout(() => {
-      setMessages(m => [...m, {
-        role: 'ai',
-        content: 'The decision boundary is where P(y=1|x) = 0.5, which means z = 0. The model learns weight vector w that places this boundary to best separate the two classes in feature space.',
-        evidenceCount: 2,
-      }])
-    }, 800)
+    )
+  const { path, nodes, threads } = node.data
+  const current = node.data.node
+  const ancestors = []
+  let parent = nodes.find((item) => item.id === current.parent_id)
+  while (parent) {
+    ancestors.unshift(parent)
+    parent = nodes.find((item) => item.id === parent!.parent_id)
   }
-
-  return (
-    <div className="flex flex-col h-full">
-      {/* Context indicator */}
-      <div className="relative mb-3">
-        <div className="p-3 bg-[#F0EEE9] rounded-lg border border-[#E3E0D8]">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-xs text-[#A8A5A0] uppercase tracking-widest mb-1">AI Context</p>
-              <div className="flex items-center gap-1.5 text-xs font-medium text-[#1A1916]">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#4A5FA5] inline-block"></span>
-                Logistic Regression
-              </div>
-            </div>
-            <button
-              onClick={() => setShowContext(!showContext)}
-              className="text-xs text-[#7A7870] hover:text-[#1A1916] transition-colors flex items-center gap-1"
-            >
-              Context <span className="text-[#C0BDB5]">{showContext ? '▴' : '▾'}</span>
-            </button>
-          </div>
-        </div>
-        {showContext && <ContextPopover onClose={() => setShowContext(false)} />}
-      </div>
-
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto space-y-3 pr-0.5 mb-3">
-        {messages.map((msg, i) => (
-          <div key={i} className={msg.role === 'user' ? 'flex justify-end' : ''}>
-            {msg.role === 'user' ? (
-              <div className="bg-[#2D2C28] text-white text-xs px-3 py-2 rounded-xl rounded-br-sm max-w-[90%] leading-relaxed">
-                {msg.content}
-              </div>
-            ) : (
-              <div>
-                <p className="text-xs text-[#3D3C38] leading-relaxed mb-2 whitespace-pre-line">{msg.content}</p>
-                {msg.evidenceCount && (
-                  <>
-                    <button
-                      onClick={() => setShowEvidence(!showEvidence)}
-                      className="flex items-center gap-1.5 text-xs text-[#7A7870] hover:text-[#1A1916] transition-colors mb-2"
-                    >
-                      <span className="text-[#A8A5A0]">⬡</span>
-                      Evidence · {msg.evidenceCount} sources
-                      <span className="text-[#C0BDB5]">{showEvidence ? '▴' : '▾'}</span>
-                    </button>
-                    {showEvidence && (
-                      <div className="space-y-1.5 mb-2">
-                        {evidenceSources.slice(0, msg.evidenceCount).map((src, si) => (
-                          <div key={si} className="bg-[#F7F6F2] border border-[#E3E0D8] rounded-lg p-2.5">
-                            <p className="text-xs font-medium text-[#1A1916]">{src.title}</p>
-                            <p className="text-xs text-[#A8A5A0] mt-0.5">{src.type}{src.chapter ? ` · ${src.chapter}` : ''}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    <div className="flex flex-wrap gap-1.5">
-                      <button
-                        onClick={onSaveToNotebook}
-                        className="text-xs text-[#5B7A58] border border-[#C5D9C4] bg-[#EFF4EE] px-2 py-1 rounded hover:bg-[#E3EEE2] transition-colors"
-                      >
-                        Save to Notebook
-                      </button>
-                      <button className="text-xs text-[#7A7870] border border-[#E3E0D8] px-2 py-1 rounded hover:bg-[#F0EEE9] transition-all">
-                        Explore Further
-                      </button>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Input */}
-      <div className="border-t border-[#E3E0D8] pt-3">
-        <div className="flex gap-2">
-          <input
-            value={input}
-            onChange={e => setInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && send()}
-            placeholder="Ask about this topic…"
-            className="flex-1 text-xs bg-[#F7F6F2] border border-[#E3E0D8] rounded-lg px-3 py-2 outline-none focus:border-[#9B9890] focus:bg-white transition-all placeholder:text-[#C0BDB5]"
-          />
-          <button onClick={send} className="bg-[#2D2C28] text-white text-xs px-3 py-2 rounded-lg hover:bg-[#1A1916] transition-colors">
-            →
-          </button>
-        </div>
-      </div>
-    </div>
+  const closed = thread.data?.thread.status === 'closed'
+  const title = threadId ? thread.data!.thread.title : current.title
+  const next = nodes.find(
+    (item) => item.id !== nodeId && item.position > current.position && item.status !== 'completed',
   )
-}
-
-function NotebookPanel({ onSaved }: { onSaved: () => void }) {
-  const [search, setSearch] = useState('')
-  const [noteText, setNoteText] = useState('')
-  const filtered = notebookEntries.filter(e => !search || e.title.toLowerCase().includes(search.toLowerCase()))
-
+  const threadOrigin = { path_id: path.id, node_id: nodeId }
+  const abstained = active?.status === 'abstained'
+  const warnings = Array.isArray(active?.evaluation?.retrieval_warnings)
+    ? active.evaluation.retrieval_warnings.filter(
+        (warning): warning is string => typeof warning === 'string',
+      )
+    : []
+  function showEvidence() {
+    setRightPanel('evidence')
+  }
   return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between mb-3">
-        <p className="text-xs font-medium text-[#1A1916] uppercase tracking-widest">Notebook</p>
-        <button className="text-xs text-[#5B7A58] hover:text-[#3D6039] transition-colors">+ New note</button>
-      </div>
-      <p className="text-xs text-[#A8A5A0] mb-2">Machine Learning</p>
-      <input
-        value={search}
-        onChange={e => setSearch(e.target.value)}
-        placeholder="Search notes…"
-        className="w-full text-xs bg-[#F0EEE9] border border-[#E3E0D8] rounded-lg px-3 py-1.5 outline-none focus:bg-white focus:border-[#9B9890] transition-all placeholder:text-[#C0BDB5] mb-3"
-      />
-      <div className="space-y-1.5 mb-4 flex-1 overflow-y-auto">
-        <p className="text-xs text-[#A8A5A0] uppercase tracking-widest mb-1">Recent</p>
-        {filtered.map(entry => (
-          <div key={entry.id} className="p-2.5 rounded-lg border border-[#F0EEE9] hover:border-[#E3E0D8] hover:bg-white cursor-pointer transition-all">
-            <p className="text-xs font-medium text-[#1A1916] leading-snug">{entry.title}</p>
-            <div className="flex justify-between mt-0.5">
-              <p className="text-xs text-[#A8A5A0]">{entry.source}</p>
-              <p className="text-xs text-[#C0BDB5]">{entry.time}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-      {/* Save current content */}
-      <div className="border-t border-[#E3E0D8] pt-3">
-        <p className="text-xs font-medium text-[#7A7870] mb-2">Save to Notebook</p>
-        <div className="bg-[#F7F6F2] border border-[#E3E0D8] rounded-lg p-2.5 mb-2">
-          <p className="text-xs text-[#3D3C38] italic leading-relaxed">
-            "Logistic regression predicts the probability of a class using the sigmoid function."
-          </p>
-        </div>
-        <textarea
-          value={noteText}
-          onChange={e => setNoteText(e.target.value)}
-          placeholder="Why this matters to me…"
-          rows={2}
-          className="w-full text-xs bg-white border border-[#E3E0D8] rounded-lg px-3 py-2 outline-none focus:border-[#9B9890] transition-all placeholder:text-[#C0BDB5] resize-none mb-2"
-        />
-        <div className="flex items-center gap-1.5 text-xs text-[#A8A5A0] mb-2">
-          <span>Saved from:</span>
-          <span className="text-[#5A5850] font-medium">Logistic Regression</span>
-          <span>·</span>
-          <span>Learning Node</span>
-        </div>
+    <div className="screen-enter flex min-h-full flex-col xl:h-full xl:flex-row">
+      <aside className="w-full flex-shrink-0 border-b border-[#E3E0D8] p-4 xl:w-52 xl:overflow-y-auto xl:border-b-0 xl:border-r">
+        <p className="mb-3 text-[10px] uppercase tracking-widest text-[#A8A5A0]">Current path</p>
         <button
-          onClick={() => { onSaved(); setNoteText('') }}
-          className="w-full bg-[#5B7A58] text-white text-xs py-2 rounded-md hover:bg-[#4A6948] transition-colors"
+          className="mb-2 text-left text-xs text-[#7A7870] hover:text-[#5B7A58]"
+          onClick={() => onNavigate('graph', { path_id: path.id })}
         >
-          Save
+          {path.title}
         </button>
-      </div>
-    </div>
-  )
-}
-
-function EvidencePanel() {
-  const [expanded, setExpanded] = useState<string | null>(null)
-  return (
-    <div className="flex flex-col h-full overflow-y-auto">
-      <div className="mb-4">
-        <p className="text-xs font-medium text-[#1A1916] uppercase tracking-widest mb-1">Evidence</p>
-        <p className="text-xs text-[#7A7870]">For: Logistic Regression</p>
-      </div>
-      {/* Grounding summary */}
-      <div className="bg-[#EFF4EE] border border-[#C5D9C4] rounded-lg p-3 mb-4">
-        <div className="flex justify-between text-xs mb-1">
-          <span className="text-[#7A7870]">Grounding</span>
-          <span className="text-[#5B7A58] font-medium">Strong</span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-[#7A7870]">Sources</span>
-          <span className="text-[#1A1916] font-mono">3</span>
-        </div>
-      </div>
-
-      <div className="space-y-2 mb-5">
-        {evidenceSources.map((src, i) => (
-          <div key={i} className="bg-white border border-[#E3E0D8] rounded-lg overflow-hidden">
-            <button
-              onClick={() => setExpanded(expanded === String(i) ? null : String(i))}
-              className="w-full p-3 text-left hover:bg-[#F7F6F2] transition-colors"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <div className="flex-1">
-                  <p className="text-xs font-medium text-[#1A1916] leading-snug">{src.title}</p>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-xs text-[#A8A5A0]">{src.type}</span>
-                    {src.chapter && <span className="text-xs text-[#A8A5A0]">· {src.chapter}</span>}
-                    <span className={`text-xs px-1.5 py-0.5 rounded ${
-                      src.relevance === 'High' ? 'bg-[#EFF4EE] text-[#5B7A58]' : 'bg-[#F0EEE9] text-[#7A7870]'
-                    }`}>{src.relevance}</span>
-                  </div>
-                </div>
-                <span className="text-[#C0BDB5] text-xs flex-shrink-0">{expanded === String(i) ? '▴' : '▾'}</span>
-              </div>
-            </button>
-            {expanded === String(i) && (
-              <div className="px-3 pb-3 border-t border-[#F0EEE9]">
-                <p className="text-xs text-[#5A5850] italic leading-relaxed mt-2 mb-2">{src.excerpt}</p>
-                <div className="flex gap-1.5">
-                  <button className="text-xs text-[#7A7870] border border-[#E3E0D8] px-2 py-1 rounded hover:bg-[#F0EEE9] transition-all">Open source</button>
-                  <button className="text-xs text-[#7A7870] border border-[#E3E0D8] px-2 py-1 rounded hover:bg-[#F0EEE9] transition-all">View context</button>
-                </div>
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-
-      {/* Content evaluation */}
-      <div className="border-t border-[#E3E0D8] pt-4">
-        <p className="text-xs font-medium text-[#7A7870] uppercase tracking-widest mb-3">Content Check</p>
-        <div className="space-y-2 mb-3">
-          {[
-            { label: 'Relevance', value: 'High', color: 'text-[#5B7A58]' },
-            { label: 'Completeness', value: 'High', color: 'text-[#5B7A58]' },
-            { label: 'Evidence', value: 'Strong', color: 'text-[#5B7A58]' },
-            { label: 'Grounding', value: '92%', color: 'text-[#1A1916]' },
-          ].map((item, i) => (
-            <div key={i} className="flex justify-between text-xs">
-              <span className="text-[#7A7870]">{item.label}</span>
-              <span className={`font-medium ${item.color}`}>{item.value}</span>
-            </div>
-          ))}
-        </div>
-        <p className="text-xs text-[#A8A5A0] leading-relaxed">
-          Evaluation reflects alignment with retrieved evidence and predefined quality criteria. It does not guarantee factual correctness.
-        </p>
-      </div>
-    </div>
-  )
-}
-
-function ThreadsPanel({ onOpenThread }: { onOpenThread: () => void }) {
-  return (
-    <div className="flex flex-col h-full">
-      <div className="flex items-center justify-between mb-4">
-        <p className="text-xs font-medium text-[#1A1916] uppercase tracking-widest">Threads</p>
-        <span className="text-xs text-[#A8A5A0]">5 explored</span>
-      </div>
-      <button className="w-full text-left text-xs border border-dashed border-[#C0BDB5] rounded-lg px-3 py-2 text-[#7A7870] hover:border-[#9B9890] hover:text-[#1A1916] hover:bg-white transition-all mb-3">
-        + New Thread
-      </button>
-      <div className="space-y-1.5 flex-1 overflow-y-auto">
-        <p className="text-xs text-[#A8A5A0] mb-1">Recent</p>
-        {threads.map(thread => (
+        {ancestors.map((item) => (
           <button
-            key={thread.id}
-            onClick={onOpenThread}
-            className="w-full text-left p-2.5 rounded-lg border border-[#F0EEE9] hover:border-[#E3E0D8] hover:bg-white cursor-pointer transition-all group"
+            key={item.id}
+            className="mb-2 block text-left text-xs text-[#A8A5A0]"
+            onClick={() => onNavigate('node', { path_id: path.id, node_id: item.id })}
           >
-            <div className="flex items-start gap-2">
-              <span className="text-[#4A5FA5] text-xs mt-0.5">↗</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-medium text-[#1A1916] leading-snug">{thread.title}</p>
-                <p className="text-xs text-[#A8A5A0] mt-0.5">{thread.parent}</p>
-                <p className="text-xs text-[#C0BDB5]">{thread.time}</p>
-              </div>
-              <span className={`text-xs px-1.5 py-0.5 rounded flex-shrink-0 ${
-                thread.status === 'exploring'
-                  ? 'bg-[#EEF0F9] text-[#4A5FA5]'
-                  : 'bg-[#F0EEE9] text-[#A8A5A0]'
-              }`}>{thread.status}</span>
-            </div>
+            › {item.title}
           </button>
         ))}
-      </div>
-    </div>
-  )
-}
-
-export default function LearningNode({ onNavigate }: LearningNodeProps) {
-  const [activeSection, setActiveSection] = useState('Concept')
-  const [rightPanel, setRightPanel] = useState<RightPanel>('ai')
-  const [nodeStatus, setNodeStatus] = useState<NodeStatus>('in-progress')
-  const [showThread, setShowThread] = useState(false)
-  const [showCompletionMsg, setShowCompletionMsg] = useState(false)
-  const [expandedCallout, setExpandedCallout] = useState<string | null>(null)
-  const [toast, setToast] = useState<string | null>(null)
-  const [showGoDeeper, setShowGoDeeper] = useState(false)
-  const [deeperContent, setDeeperContent] = useState<string | null>(null)
-
-  function saveToNotebook() {
-    setToast('Saved to Notebook')
-    setRightPanel('notebook')
-  }
-
-  function handleComplete() {
-    setNodeStatus('completed')
-    setShowCompletionMsg(true)
-  }
-
-  function handleDeeperAction(action: string) {
-    if (action === 'Show example') {
-      setDeeperContent('example')
-    } else if (action === 'Explain differently') {
-      setDeeperContent('differently')
-    } else {
-      setDeeperContent('related')
-    }
-  }
-
-  const panelTabs: { id: RightPanel; label: string }[] = [
-    { id: 'ai', label: 'AI' },
-    { id: 'notebook', label: 'Notebook' },
-    { id: 'evidence', label: 'Evidence' },
-  ]
-
-  return (
-    <div className="screen-enter flex h-[calc(100vh-4rem)] gap-0">
-      {/* Toast */}
-      {toast && <Toast message={toast} onClose={() => setToast(null)} />}
-
-      {/* Left: Curriculum context */}
-      <div className="w-52 flex-shrink-0 border-r border-[#E3E0D8] px-4 pt-4 overflow-y-auto">
-        <div className="mb-5">
-          <p className="text-xs text-[#A8A5A0] uppercase tracking-widest mb-3">Current Path</p>
-          {[
-            { label: 'Machine Learning', active: false },
-            { label: 'Supervised Learning', active: false },
-            { label: 'Logistic Regression', active: true },
-          ].map((p, i, arr) => (
-            <div key={i} className="flex items-start gap-2 mb-1">
-              <div className="flex flex-col items-center mt-1.5 flex-shrink-0">
-                <div className={`w-1.5 h-1.5 rounded-full ${p.active ? 'bg-[#4A5FA5]' : 'bg-[#C0BDB5]'}`}></div>
-                {i < arr.length - 1 && <div className="w-px h-4 bg-[#E3E0D8] my-0.5"></div>}
-              </div>
-              <button
-                onClick={() => !p.active && onNavigate('graph')}
-                className={`text-xs leading-relaxed text-left transition-colors ${
-                  p.active ? 'text-[#1A1916] font-medium' : 'text-[#7A7870] hover:text-[#1A1916]'
-                }`}
-              >
-                {p.label}
-              </button>
-            </div>
-          ))}
-        </div>
-
-        <div className="border-t border-[#E3E0D8] pt-4 mb-4">
-          <p className="text-xs text-[#A8A5A0] uppercase tracking-widest mb-3">This Module</p>
-          <div className="space-y-0.5">
-            {[
-              { label: 'Linear Regression', state: 'completed' },
-              { label: 'Logistic Regression', state: nodeStatus === 'completed' ? 'completed' : 'current' },
-              { label: 'Decision Trees', state: 'locked' },
-            ].map((n, i) => (
-              <div key={i} className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs transition-all ${
-                n.state === 'current' ? 'bg-[#EEF0F9] text-[#4A5FA5]' :
-                n.state === 'completed' ? 'text-[#5B7A58]' :
-                'text-[#A8A5A0]'
-              }`}>
-                <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-                  n.state === 'completed' ? 'bg-[#5B7A58]' :
-                  n.state === 'current' ? 'bg-[#4A5FA5]' : 'bg-[#D4D0C8]'
-                }`}></div>
-                {n.label}
-                {n.state === 'completed' && <span className="ml-auto text-[#5B7A58] text-[9px]">✓</span>}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Session button */}
         <button
-          onClick={() => onNavigate('session')}
-          className="w-full text-xs border border-[#E3E0D8] text-[#7A7870] px-3 py-2 rounded-lg hover:bg-white hover:border-[#B8B5AD] transition-all flex items-center gap-2"
+          className={`mb-5 block text-left text-sm font-medium ${
+            !threadId ? 'text-[#4A5FA5]' : 'text-[#7A7870]'
+          }`}
+          onClick={() => onNavigate('node', threadOrigin)}
         >
-          <span className="w-1.5 h-1.5 rounded-full bg-[#5B7A58] animate-pulse inline-block"></span>
-          View session
+          {current.title}
         </button>
-      </div>
-
-      {/* Center: Learning content */}
-      <div className="flex-1 overflow-y-auto px-7 pt-4 pb-8">
-        {showThread ? (
-          <ExploratoryThread onClose={() => setShowThread(false)} onSave={saveToNotebook} />
-        ) : (
-          <>
-            {/* Node header */}
-            <div className="mb-5">
-              <div className="flex items-center gap-2 text-xs text-[#A8A5A0] mb-2">
-                <span>Supervised Learning</span>
-                <span>·</span>
-                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border ${
-                  nodeStatus === 'completed'
-                    ? 'text-[#5B7A58] bg-[#EFF4EE] border-[#C5D9C4]'
-                    : 'text-[#4A5FA5] bg-[#EEF0F9] border-[#C5CEED]'
-                }`}>
-                  <span className={`w-1.5 h-1.5 rounded-full inline-block ${nodeStatus === 'completed' ? 'bg-[#5B7A58]' : 'bg-[#4A5FA5]'}`}></span>
-                  {nodeStatus === 'completed' ? 'Completed' : 'In progress'}
-                </span>
-              </div>
-              <h1 className="font-display text-4xl font-light text-[#1A1916] mb-1">Logistic Regression</h1>
-              <p className="text-sm text-[#7A7870]">Learning Node · Supervised Learning</p>
-            </div>
-
-            {/* Section tabs */}
-            <div className="flex gap-0 mb-6 border-b border-[#E3E0D8]">
-              {sections.map(s => (
-                <button
-                  key={s}
-                  onClick={() => setActiveSection(s)}
-                  className={`text-xs px-3 py-2 -mb-px border-b-2 transition-all ${
-                    activeSection === s
-                      ? 'border-[#4A5FA5] text-[#4A5FA5] font-medium'
-                      : 'border-transparent text-[#7A7870] hover:text-[#1A1916]'
-                  }`}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-
-            {/* Main content */}
-            <div className="prose-trellis max-w-none">
-              {activeSection === 'Concept' && (
-                <>
-                  <h2>What is Logistic Regression?</h2>
-                  <p>
-                    Logistic Regression is a <span className="bg-[#EFF4EE] text-[#3D6039] px-1 rounded">classification algorithm</span> used
-                    to estimate the probability that an input belongs to a particular class. Despite its name, it is a
-                    classification method — not a regression method in the predictive sense.
-                  </p>
-                  <p>
-                    Given input features <code>x</code>, logistic regression predicts P(y=1|x) — the probability the
-                    output belongs to the positive class — by passing a linear combination through the sigmoid function.
-                  </p>
-                  <div
-                    className="math-block cursor-pointer hover:bg-[#E8E6E0] transition-colors"
-                    onClick={() => setExpandedCallout(expandedCallout === 'sigmoid' ? null : 'sigmoid')}
-                  >
-                    <span className="text-[#A8A5A0] text-xs block mb-1">Decision function</span>
-                    P(y=1|x) = σ(wᵀx + b) = 1 / (1 + e<sup>−(wᵀx+b)</sup>)
-                  </div>
-                  {expandedCallout === 'sigmoid' && (
-                    <div className="callout text-sm">
-                      <strong className="text-[#3D6039]">Why σ?</strong> The sigmoid maps any real number to (0,1), making it ideal for
-                      probability outputs. As z → ∞, σ(z) → 1; as z → −∞, σ(z) → 0.
-                    </div>
-                  )}
-                  <h2>When to use it</h2>
-                  <ul className="list-none space-y-1.5 mb-4">
-                    {[
-                      'The output is binary (spam/not spam, fraud/not fraud)',
-                      'You need interpretable feature weights',
-                      'The relationship between features and log-odds is approximately linear',
-                      'You want probabilistic predictions, not just class labels',
-                    ].map((item, i) => (
-                      <li key={i} className="flex items-start gap-2 text-sm text-[#3D3C38]">
-                        <span className="w-1.5 h-1.5 rounded-full bg-[#5B7A58] mt-1.5 flex-shrink-0"></span>
-                        {item}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="callout">
-                    <span className="text-xs font-medium text-[#5B7A58] block mb-1">Connection to Linear Regression</span>
-                    <p className="text-sm text-[#3D3C38] mb-0">
-                      Logistic regression is essentially linear regression wrapped in a sigmoid. Where linear regression
-                      predicts a continuous value, logistic regression predicts a probability.
-                    </p>
-                  </div>
-                </>
-              )}
-
-              {activeSection === 'How It Works' && (
-                <>
-                  <h2>Training Process</h2>
-                  <p>
-                    Logistic regression is trained using <span className="bg-[#EFF4EE] text-[#3D6039] px-1 rounded">maximum likelihood estimation</span>.
-                    We find weights w that maximize the probability of observing the training labels.
-                  </p>
-                  <div className="math-block">
-                    Loss(w) = −Σ [yᵢ log(σ(wᵀxᵢ)) + (1−yᵢ) log(1−σ(wᵀxᵢ))]
-                    <span className="text-[#A8A5A0] text-xs block mt-1">Binary Cross-Entropy Loss</span>
-                  </div>
-                  <p>
-                    This loss function is convex, meaning gradient descent reliably finds the global minimum.
-                  </p>
-                </>
-              )}
-
-              {activeSection === 'Example' && (
-                <>
-                  <h2>Spam Classification</h2>
-                  <p>Predicting whether an email is spam using logistic regression:</p>
-                  <div className="bg-[#F0EEE9] rounded-lg border border-[#E3E0D8] p-4 font-mono text-xs mb-4">
-                    <p className="text-[#A8A5A0] mb-2">Features:</p>
-                    <p className="text-[#3D3C38]">x₁ = keyword frequency = 0.87</p>
-                    <p className="text-[#3D3C38]">x₂ = sender reputation = 0.12</p>
-                    <p className="text-[#3D3C38]">x₃ = message length = 0.45</p>
-                    <p className="text-[#A8A5A0] mt-2 mb-1">Prediction:</p>
-                    <p className="text-[#5B7A58] font-medium">P(spam) = σ(2.1·0.87 − 1.8·0.12 + 0.3·0.45) = 0.87</p>
-                  </div>
-                  <p>With P(spam) = 0.87, the model classifies this as spam (threshold at 0.5).</p>
-                  <button
-                    onClick={saveToNotebook}
-                    className="text-xs text-[#5B7A58] border border-[#C5D9C4] bg-[#EFF4EE] px-3 py-1.5 rounded hover:bg-[#E3EEE2] transition-colors"
-                  >
-                    Save example
-                  </button>
-                </>
-              )}
-
-              {activeSection !== 'Concept' && activeSection !== 'How It Works' && activeSection !== 'Example' && (
-                <p className="text-[#A8A5A0] italic">Click a section tab above to explore that content.</p>
-              )}
-
-              {/* Go Deeper */}
-              <div className="border-t border-[#E3E0D8] mt-8 pt-6">
-                <div className="flex items-center justify-between mb-3">
-                  <p className="text-sm font-medium text-[#7A7870]">Go deeper</p>
-                  <button
-                    onClick={() => { setShowGoDeeper(!showGoDeeper); setDeeperContent(null) }}
-                    className="text-xs text-[#A8A5A0] hover:text-[#7A7870]"
-                  >{showGoDeeper ? '▴ Less' : '▾ Expand'}</button>
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {['Explain differently', 'Show example', 'Show practical application', 'Compare concepts', 'Explore related concept'].map((action) => (
-                    <button
-                      key={action}
-                      onClick={() => { setShowGoDeeper(true); handleDeeperAction(action) }}
-                      className="text-xs border border-[#E3E0D8] text-[#3D3C38] px-3 py-2 rounded-md hover:border-[#B8B5AD] hover:bg-white transition-all"
-                    >
-                      {action}
-                    </button>
-                  ))}
-                </div>
-
-                {showGoDeeper && deeperContent === 'example' && (
-                  <div className="mt-4 screen-enter">
-                    <h2 className="font-display text-lg font-medium text-[#1A1916] mb-3">Worked Example — Spam Classification</h2>
-                    <div className="bg-[#F0EEE9] rounded-lg border border-[#E3E0D8] p-4 font-mono text-xs mb-3">
-                      <p className="text-[#A8A5A0] mb-2">Features</p>
-                      <p>x₁ = keyword frequency = 0.87</p>
-                      <p>x₂ = sender reputation = 0.12</p>
-                      <p className="text-[#5B7A58] mt-2">P(spam) = 0.87</p>
-                    </div>
-                    <button onClick={saveToNotebook} className="text-xs text-[#5B7A58] border border-[#C5D9C4] bg-[#EFF4EE] px-3 py-1.5 rounded hover:bg-[#E3EEE2] transition-colors">
-                      Save example
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {/* Exploratory thread prompt */}
-              <div className="mt-5 p-4 border border-[#E3E0D8] rounded-lg bg-[#F9F8F5] flex items-center justify-between">
-                <div>
-                  <p className="text-xs text-[#A8A5A0] mb-0.5">Tangential exploration</p>
-                  <p className="text-sm text-[#1A1916] font-medium">What is the history of logistic regression?</p>
-                </div>
-                <button
-                  onClick={() => setShowThread(true)}
-                  className="text-xs text-[#4A5FA5] border border-[#C5CEED] bg-[#EEF0F9] px-3 py-1.5 rounded-md hover:bg-[#E4E8F5] transition-colors flex items-center gap-1.5 flex-shrink-0 ml-3"
-                >
-                  <span>↗</span> Explore Thread
-                </button>
-              </div>
-
-              {/* Node completion */}
-              <div className="mt-6 bg-white border border-[#E3E0D8] rounded-xl p-5">
-                <p className="text-xs text-[#A8A5A0] uppercase tracking-widest mb-3">Learning Progress</p>
-                {showCompletionMsg ? (
-                  <div className="screen-enter">
-                    <div className="flex items-center gap-2 mb-4">
-                      <span className="w-6 h-6 rounded-full bg-[#5B7A58] flex items-center justify-center text-white text-xs flex-shrink-0">✓</span>
-                      <p className="font-medium text-[#5B7A58]">Logistic Regression completed</p>
-                    </div>
-                    <p className="text-xs text-[#7A7870] mb-3">Next recommended node:</p>
-                    <div className="bg-[#F7F6F2] border border-[#E3E0D8] rounded-lg p-3 mb-3">
-                      <p className="text-sm font-medium text-[#1A1916]">Decision Trees</p>
-                      <p className="text-xs text-[#A8A5A0]">Supervised Learning · Available</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => onNavigate('graph')} className="flex-1 text-xs bg-[#2D2C28] text-white py-2.5 rounded-md hover:bg-[#1A1916] transition-colors">
-                        Continue →
-                      </button>
-                      <button className="text-xs border border-[#E3E0D8] text-[#7A7870] px-4 py-2.5 rounded-md hover:bg-[#F0EEE9] transition-all">
-                        Stay here
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  <>
-                    <div className="flex items-center gap-3 mb-4">
-                      {[
-                        { label: 'Not started', state: 'inactive' },
-                        { label: 'In progress', state: 'active' },
-                        { label: 'Completed', state: 'inactive' },
-                      ].map((s, i) => (
-                        <div key={i} className={`flex items-center gap-1.5 text-xs ${s.state === 'active' ? 'text-[#4A5FA5]' : 'text-[#A8A5A0]'}`}>
-                          <div className={`w-3 h-3 rounded-full border flex items-center justify-center ${
-                            i === 0 ? 'border-[#D4D0C8]' :
-                            i === 1 ? 'border-[#4A5FA5]' : 'border-[#D4D0C8]'
-                          }`}>
-                            {i === 1 && <div className="w-1.5 h-1.5 rounded-full bg-[#4A5FA5]"></div>}
-                          </div>
-                          {s.label}
-                        </div>
-                      ))}
-                    </div>
-                    <button
-                      onClick={handleComplete}
-                      className="w-full bg-[#5B7A58] text-white text-sm py-2.5 rounded-lg hover:bg-[#4A6948] transition-colors"
-                    >
-                      Mark Node Complete
-                    </button>
-                  </>
-                )}
-              </div>
-            </div>
-          </>
-        )}
-      </div>
-
-      {/* Right: Contextual workspace */}
-      <div className="w-72 flex-shrink-0 border-l border-[#E3E0D8] flex flex-col">
-        {/* Panel tabs */}
-        <div className="flex border-b border-[#E3E0D8] flex-shrink-0">
-          {panelTabs.map(tab => (
+        <div className="mb-5">
+          <Status value={current.status} />
+        </div>
+        <div className="border-t border-[#E3E0D8] pt-4">
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-[10px] uppercase tracking-widest text-[#A8A5A0]">
+              Exploratory threads
+            </p>
             <button
-              key={tab.id}
-              onClick={() => setRightPanel(tab.id)}
-              className={`flex-1 text-xs py-3 font-medium transition-all border-b-2 ${
-                rightPanel === tab.id
-                  ? 'border-[#4A5FA5] text-[#4A5FA5] bg-white'
-                  : 'border-transparent text-[#7A7870] hover:text-[#1A1916] bg-[#F7F6F2]'
+              aria-label="New exploratory thread"
+              className="icon-button"
+              onClick={() => {
+                setThreadTitle('')
+                setCreatingThread(true)
+              }}
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+          {threads.length === 0 && (
+            <p className="text-xs leading-relaxed text-[#A8A5A0]">
+              Explore a related thought while keeping this node focused.
+            </p>
+          )}
+          {threads.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => onNavigate('node', { ...threadOrigin, thread_id: item.id })}
+              className={`mb-2 w-full rounded-lg border p-3 text-left ${
+                threadId === item.id
+                  ? 'border-[#D4DBF0] bg-[#EEF0F9]'
+                  : 'border-transparent hover:bg-[#F0EEE9]'
               }`}
             >
-              {tab.label}
+              <p className="text-xs font-medium">↗ {item.title}</p>
+              <p className="mt-1 text-[10px] text-[#A8A5A0]">{item.status}</p>
             </button>
           ))}
-          <button
-            onClick={() => setRightPanel(rightPanel)}
-            className="px-3 text-[#A8A5A0] hover:text-[#7A7870] transition-colors border-b-2 border-transparent bg-[#F7F6F2]"
-            title="Threads"
+        </div>
+      </aside>
+      <section className="min-w-0 flex-1 overflow-y-auto px-6 py-6 lg:px-9">
+        <div className="mb-5 flex items-center gap-2 text-xs text-[#A8A5A0]">
+          <button onClick={() => onNavigate('graph', { path_id: path.id })}>{path.title}</button>
+          <ChevronRight size={12} />
+          <span className="text-[#7A7870]">
+            {threadId ? 'Exploratory thread' : 'Learning node'}
+          </span>
+        </div>
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="font-display text-3xl font-light">{title}</h1>
+            <p className="mt-2 text-sm text-[#7A7870]">
+              {threadId ? `Exploring from ${current.title}` : current.description}
+            </p>
+          </div>
+          {threadId ? (
+            <button
+              className="btn-secondary"
+              disabled={update.isPending}
+              onClick={() =>
+                update.mutate({
+                  path: `/threads/${threadId}`,
+                  body: { status: closed ? 'open' : 'closed' },
+                })
+              }
+            >
+              {closed ? 'Reopen thread' : 'Close thread'}
+            </button>
+          ) : (
+            <select
+              aria-label="Learning progress"
+              className="rounded-lg border border-[#E3E0D8] bg-white p-2 text-xs"
+              value={current.status}
+              disabled={update.isPending}
+              onChange={(event) =>
+                update.mutate({
+                  path: `/nodes/${nodeId}/progress`,
+                  body: { status: event.target.value },
+                })
+              }
+            >
+              <option value="not_started">Not started</option>
+              <option value="in_progress">In progress</option>
+              <option value="completed">Completed</option>
+            </select>
+          )}
+        </div>
+        {threadId && (
+          <div className="mb-6 rounded-lg border border-[#D4DBF0] bg-[#EEF0F9] p-4">
+            <p className="text-sm text-[#4A5FA5]">
+              This thread has its own conversation. Your primary node and progress stay intact.
+            </p>
+            <button
+              className="mt-2 inline-flex items-center gap-1 text-xs text-[#4A5FA5]"
+              onClick={() => onNavigate('node', threadOrigin)}
+            >
+              <ArrowLeft size={13} /> Return to Learning Node
+            </button>
+          </div>
+        )}
+        <ErrorNotice error={send.error || update.error} />
+        {saved && (
+          <div
+            role="status"
+            className="mb-4 flex items-center justify-between rounded-lg bg-[#EFF4EE] p-3 text-sm text-[#5B7A58]"
           >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-              <path d="M2 3h10M5 7h7M5 11h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </button>
+            <span>Saved to Notebook</span>
+            <button onClick={() => onNavigate('notebook')}>Open Notebook →</button>
+          </div>
+        )}
+        {interactions.length === 0 ? (
+          <Empty title={threadId ? 'Follow this thought.' : 'Build your understanding.'}>
+            <p className="mb-4">
+              Ask a question or request an introduction. Answers use the evidence available for this
+              journey.
+            </p>
+            <button
+              className="btn"
+              disabled={send.isPending || closed}
+              onClick={() =>
+                send.mutate({
+                  text: `Introduce ${title} and explain its main ideas.`,
+                  action: 'foundation',
+                })
+              }
+            >
+              {send.isPending ? 'Preparing an introduction…' : 'Explain this topic'}
+            </button>
+          </Empty>
+        ) : (
+          active && (
+            <article>
+              <div className="mb-4 flex items-center justify-between gap-2">
+                <p className="text-xs text-[#A8A5A0]">
+                  {active.action.replaceAll('_', ' ')} · {date(active.created_at)}
+                </p>
+                <Status value={active.status} label={responseFeedback(active).label} />
+              </div>
+              <h2 className="mb-5 font-display text-xl">{active.prompt}</h2>
+              {abstained ? (
+                <div className="rounded-xl border border-[#E6DCC8] bg-[#FBF7ED] p-5">
+                  <p className="text-sm leading-relaxed text-[#6F6047]">
+                    {responseFeedback(active).message}
+                  </p>
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      className="btn-secondary"
+                      disabled={send.isPending || closed}
+                      onClick={() => send.mutate({ text: active.prompt, action: active.action })}
+                    >
+                      <RotateCcw size={14} /> {send.isPending ? 'Trying again…' : 'Try again'}
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      onClick={() => onNavigate('sources', { path_id: path.id })}
+                    >
+                      Review sources
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <Markdown>{active.content}</Markdown>
+              )}
+              {warnings.length > 0 && (
+                <div className="mt-4 rounded-lg border border-[#E6DCC8] bg-[#FBF7ED] p-3 text-xs text-[#6F6047]">
+                  <p className="font-medium">Some sources need attention</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-4">
+                    {warnings.map((warning, index) => (
+                      <li key={index}>{assessmentText(warning, active.evidence)}</li>
+                    ))}
+                  </ul>
+                  <button
+                    className="mt-2 underline"
+                    onClick={() => onNavigate('sources', { path_id: path.id })}
+                  >
+                    Review source status
+                  </button>
+                </div>
+              )}
+              <div className="mt-6 flex flex-wrap gap-2">
+                {!abstained && (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      setSaved(false)
+                      setSavePayload({
+                        interaction_id: active.id,
+                        title: active.prompt,
+                      })
+                    }}
+                  >
+                    <Bookmark size={14} /> Save to Notebook
+                  </button>
+                )}
+                <button className="btn-secondary" onClick={showEvidence}>
+                  {active.evidence?.length || 0} {abstained ? 'consulted' : 'cited'}{' '}
+                  {active.evidence?.length === 1 ? 'passage' : 'passages'}
+                </button>
+                {!threadId && (
+                  <button
+                    className="btn-secondary"
+                    onClick={() => {
+                      setThreadTitle('')
+                      setCreatingThread(true)
+                    }}
+                  >
+                    <CornerUpRight size={14} /> Explore Further
+                  </button>
+                )}
+              </div>
+              <GroundingAssessment interaction={active} />
+            </article>
+          )
+        )}
+        <div className="mt-8 flex flex-wrap gap-2 border-t border-[#E3E0D8] pt-5">
+          {[
+            {
+              action: 'example',
+              label: 'Show example',
+              text: `Give a practical example of ${title}.`,
+            },
+            {
+              action: 'deeper',
+              label: 'Go deeper',
+              text: `Explain ${title} in more depth.`,
+            },
+            {
+              action: 'comparison',
+              label: 'Compare ideas',
+              text: `Compare ${title} with a closely related concept.`,
+            },
+            {
+              action: 'application',
+              label: 'Apply it',
+              text: `Explain how to apply ${title} in practice.`,
+            },
+          ].map((item) => (
+            <button
+              key={item.action}
+              className="btn-secondary"
+              disabled={send.isPending || closed}
+              onClick={() => send.mutate(item)}
+            >
+              {item.label}
+            </button>
+          ))}
         </div>
-
-        {/* Panel content */}
-        <div className="flex-1 overflow-hidden p-4">
-          {rightPanel === 'ai' && <AiPanel onSaveToNotebook={saveToNotebook} />}
-          {rightPanel === 'notebook' && <NotebookPanel onSaved={() => setToast('Saved to Notebook')} />}
-          {rightPanel === 'evidence' && <EvidencePanel />}
+        {!threadId && (
+          <div className="mt-8 flex justify-between gap-3 border-t border-[#E3E0D8] pt-5">
+            <button
+              className="btn-secondary"
+              onClick={() => onNavigate('graph', { path_id: path.id })}
+            >
+              <ArrowLeft size={14} /> Curriculum
+            </button>
+            {current.status === 'completed' && next ? (
+              <button
+                className="btn"
+                onClick={() => onNavigate('node', { path_id: path.id, node_id: next.id })}
+              >
+                Next topic <ArrowRight size={14} />
+              </button>
+            ) : (
+              <button
+                className="btn"
+                disabled={update.isPending || current.status === 'completed'}
+                onClick={() =>
+                  update.mutate({
+                    path: `/nodes/${nodeId}/progress`,
+                    body: { status: 'completed' },
+                  })
+                }
+              >
+                <Check size={14} /> {current.status === 'completed' ? 'Completed' : 'Mark complete'}
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+      <aside className="flex w-full flex-shrink-0 flex-col border-t border-[#E3E0D8] bg-[#FCFBF8] xl:w-80 xl:border-l xl:border-t-0 2xl:w-96">
+        <div className="flex border-b border-[#E3E0D8]">
+          {['ai', 'notebook', 'evidence'].map((tab) => (
+            <button
+              key={tab}
+              className={`flex-1 py-4 text-xs capitalize ${
+                rightPanel === tab ? 'border-b-2 border-[#5B7A58] text-[#1A1916]' : 'text-[#A8A5A0]'
+              }`}
+              onClick={() => setRightPanel(tab)}
+            >
+              {tab === 'ai' ? 'AI' : tab}
+            </button>
+          ))}
         </div>
-      </div>
+        {rightPanel === 'ai' && (
+          <div className="flex min-h-[400px] flex-1 flex-col overflow-hidden p-4">
+            <div className="mb-4 rounded-lg border border-[#E3E0D8] bg-[#F0EEE9] p-3">
+              <p className="text-[10px] uppercase tracking-widest text-[#A8A5A0]">AI Context</p>
+              <p className="mt-1 text-xs font-medium text-[#4A5FA5]">{title}</p>
+              <p className="mt-1 text-[10px] text-[#7A7870]">
+                {threadId ? 'Isolated exploratory thread' : 'Current node and its prerequisites'}
+              </p>
+            </div>
+            <div className="max-h-[50vh] flex-1 space-y-4 overflow-y-auto xl:max-h-none">
+              {interactions.map((item) => (
+                <div key={item.id}>
+                  <button
+                    className="ml-auto block max-w-[95%] rounded-xl rounded-br-sm bg-[#2D2C28] px-3 py-2 text-left text-xs text-white"
+                    onClick={() => setSelected(item.id)}
+                  >
+                    {item.prompt}
+                  </button>
+                  <button
+                    aria-label={`Read response to ${item.prompt}`}
+                    className={`mt-2 w-full rounded-lg p-2 text-left text-xs leading-relaxed ${
+                      active?.id === item.id ? 'bg-[#F0EEE9]' : 'hover:bg-[#F0EEE9]'
+                    }`}
+                    onClick={() => setSelected(item.id)}
+                  >
+                    <div className="text-[#5A5850]">
+                      <Markdown compact>{responseFeedback(item).message}</Markdown>
+                    </div>
+                    <span className="mt-2 block text-[10px] text-[#5B7A58]">
+                      {item.status === 'abstained' ? 'Answer withheld' : 'Read response'} ·{' '}
+                      {item.evidence?.length || 0}{' '}
+                      {item.status === 'abstained' ? 'consulted' : 'cited'}{' '}
+                      {item.evidence?.length === 1 ? 'passage' : 'passages'}
+                    </span>
+                  </button>
+                </div>
+              ))}
+              {send.isPending && <Loading label="Reading evidence and composing…" />}
+              <div ref={messagesEnd} />
+            </div>
+            <form
+              className="mt-4 border-t border-[#E3E0D8] pt-3"
+              onSubmit={(event) => {
+                event.preventDefault()
+                if (prompt.trim()) send.mutate({ text: prompt })
+              }}
+            >
+              <label className="sr-only" htmlFor="node-question">
+                Ask about this topic
+              </label>
+              <textarea
+                id="node-question"
+                className="field !text-xs"
+                rows={3}
+                placeholder={closed ? 'Reopen this thread to continue' : 'Ask about this topic…'}
+                value={prompt}
+                disabled={closed}
+                onChange={(event) => setPrompt(event.target.value)}
+              />
+              <button
+                className="btn mt-2 w-full"
+                disabled={!prompt.trim() || send.isPending || closed}
+              >
+                <Send size={13} />
+                {send.isPending ? 'Thinking…' : 'Ask Trellis'}
+              </button>
+            </form>
+          </div>
+        )}
+        {rightPanel === 'evidence' && (
+          <div className="flex-1 overflow-y-auto p-4">
+            <p className="mb-4 text-xs text-[#7A7870]">
+              {abstained
+                ? 'Passages consulted for this question. They did not provide enough verified support for an answer.'
+                : 'Source passages cited in the selected response.'}
+            </p>
+            {!active?.evidence?.length && (
+              <Empty title={abstained ? 'No usable passages' : 'No cited evidence'}>
+                <p>
+                  {abstained
+                    ? 'Add a relevant source and try the question again.'
+                    : 'This response has no supporting source references.'}
+                </p>
+              </Empty>
+            )}
+            {active?.evidence?.map((evidence, index) => (
+              <EvidenceCard
+                key={`${evidence.id}:${index}`}
+                evidence={evidence}
+                number={index + 1}
+                onSave={() => {
+                  setSaved(false)
+                  setSavePayload({
+                    interaction_id: active.id,
+                    evidence_id: evidence.id,
+                    title: evidence.title,
+                  })
+                }}
+              />
+            ))}
+          </div>
+        )}
+        {rightPanel === 'notebook' && (
+          <div className="flex-1 overflow-y-auto p-4">
+            <button
+              className="btn-secondary mb-4 w-full"
+              onClick={() => {
+                setSaved(false)
+                setSavePayload({ title: '' })
+              }}
+            >
+              <Plus size={13} /> Write a note
+            </button>
+            <ErrorNotice error={notebook.error} />
+            {notebook.data?.flatMap((page) =>
+              page.items
+                .filter((item) => item.node_id === nodeId)
+                .map((item) => (
+                  <button
+                    className="mb-3 block w-full rounded-lg border border-[#E3E0D8] bg-white p-3 text-left"
+                    key={item.id}
+                    onClick={() => onNavigate('notebook')}
+                  >
+                    <p className="text-xs font-medium">{item.title}</p>
+                    <p className="mt-1 text-[10px] text-[#A8A5A0]">{page.title}</p>
+                  </button>
+                )),
+            )}
+            <button className="mt-3 text-xs text-[#5B7A58]" onClick={() => onNavigate('notebook')}>
+              Open full notebook →
+            </button>
+          </div>
+        )}
+      </aside>
+      {creatingThread && (
+        <Modal title="Start an exploratory thread" onClose={() => setCreatingThread(false)}>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              createThread.mutate()
+            }}
+          >
+            <p className="mb-4 text-sm text-[#7A7870]">
+              A separate conversation starts from this topic
+              {active ? ' and the selected response' : ''}. It will not change your primary learning
+              progress.
+            </p>
+            <label htmlFor="thread-title" className="field-label">
+              What would you like to explore?
+            </label>
+            <input
+              id="thread-title"
+              maxLength={200}
+              className="field"
+              required
+              value={threadTitle}
+              onChange={(event) => setThreadTitle(event.target.value)}
+            />
+            <ErrorNotice error={createThread.error} />
+            <button className="btn mt-5" disabled={createThread.isPending || !threadTitle.trim()}>
+              {createThread.isPending ? 'Creating…' : 'Create thread'}
+            </button>
+          </form>
+        </Modal>
+      )}
+      {savePayload && (
+        <SaveToNotebook
+          pathId={path.id}
+          journeyTitle={path.title}
+          payload={{ ...savePayload, node_id: nodeId, thread_id: threadId }}
+          scopeLabel={[path.title, current.title, ...(threadId ? [title] : [])].join(' › ')}
+          onClose={() => setSavePayload(null)}
+          onSaved={() => {
+            setSavePayload(null)
+            setSaved(true)
+          }}
+        />
+      )}
     </div>
   )
 }
 
-function ExploratoryThread({ onClose, onSave }: { onClose: () => void; onSave: () => void }) {
+function GroundingAssessment({ interaction }: { interaction: Interaction }) {
+  const evaluation = interaction.evaluation
+  if (!evaluation || Object.keys(evaluation).length === 0) return null
+  const explanation =
+    evaluation.status === 'evaluation_failed'
+      ? ''
+      : assessmentText(evaluation.explanation || evaluation.reason, interaction.evidence)
   return (
-    <div className="screen-enter">
-      {/* Primary path context */}
-      <div className="bg-[#F0EEE9] border border-[#E3E0D8] rounded-lg p-3 mb-5 text-xs">
-        <p className="text-[#A8A5A0] uppercase tracking-widest mb-2">Primary Path</p>
-        <div className="flex items-center gap-1.5 text-[#7A7870]">
-          <span>Machine Learning</span>
-          <span className="text-[#C0BDB5]">›</span>
-          <span>Supervised Learning</span>
-          <span className="text-[#C0BDB5]">›</span>
-          <span className="font-medium text-[#1A1916]">Logistic Regression</span>
-        </div>
-        <div className="mt-2 flex items-center gap-1.5 text-[#4A5FA5]">
-          <span>↗</span>
-          <span className="font-medium">Exploratory Thread: History of Logistic Regression</span>
-        </div>
-      </div>
+    <details className="mt-5 border-t border-[#E3E0D8] pt-4">
+      <summary className="cursor-pointer text-xs text-[#7A7870]">Grounding assessment</summary>
+      <p className="my-3 text-xs text-[#7A7870]">
+        {interaction.status === 'abstained'
+          ? responseFeedback(interaction).label
+          : 'Source checks passed'}
+        {evaluation.correction_attempted === true ? ' · A revised draft was also checked.' : ''}
+      </p>
+      <dl className="grid grid-cols-2 gap-3 text-xs">
+        {[
+          ['relevance', 'Question relevance'],
+          ['completeness', 'Topic coverage'],
+          ['consistency', 'Source consistency'],
+          ['grounding', 'Support from sources'],
+        ].map(([key, label]) => {
+          const score = evaluation[key]
+          if (typeof score !== 'number' || !Number.isFinite(score)) return null
+          return (
+            <div key={key}>
+              <dt className="text-[#7A7870]">{label}</dt>
+              <dd className="mt-1 font-medium text-[#3D3C38]">{Math.round(score * 100)}%</dd>
+            </div>
+          )
+        })}
+      </dl>
+      {explanation && <p className="mt-3 text-xs leading-relaxed text-[#7A7870]">{explanation}</p>}
+      <p className="mt-3 text-[11px] text-[#A8A5A0]">
+        Automated checks describe the draft’s support in these passages; they do not guarantee
+        factual correctness.
+      </p>
+    </details>
+  )
+}
 
-      <div className="mb-6">
-        <p className="text-xs text-[#A8A5A0] mb-1 uppercase tracking-widest">Exploratory Thread</p>
-        <h2 className="font-display text-3xl font-light text-[#1A1916] mb-1">History of Logistic Regression</h2>
-        <p className="text-sm text-[#7A7870]">Parent: Logistic Regression · Status: Exploring</p>
-      </div>
-
-      <div className="callout mb-5">
-        <p className="text-xs font-medium text-[#7A7870] mb-1">Context preserved</p>
-        <p className="text-sm text-[#3D3C38]">
-          This thread is isolated from your primary learning path. Your progress on Logistic Regression is unaffected. Return when you're ready.
-        </p>
-      </div>
-
-      <div className="prose-trellis">
-        <h2>Origins in the 19th century</h2>
-        <p>
-          The logistic function was introduced by Belgian mathematician <span className="bg-[#EFF4EE] text-[#3D6039] px-1 rounded">Pierre François Verhulst</span> in 1838
-          to describe population growth. The term "logistic" comes from the Greek logos (ratio), describing the S-shaped curve now central to the algorithm.
-        </p>
-        <p>
-          Joseph Berkson coined the term <code>logit</code> in 1944, establishing the theoretical foundation for the
-          log-odds transformation that logistic regression optimizes.
-        </p>
-        <h2>Adoption in machine learning</h2>
-        <p>
-          By the 1980s, logistic regression was established in biostatistics and epidemiology. Its adoption in machine
-          learning was partly driven by its simplicity, interpretability, and its function as a single-layer neural network
-          with a sigmoid activation.
-        </p>
-      </div>
-
-      <div className="flex gap-3 mt-8 border-t border-[#E3E0D8] pt-5">
-        <button onClick={onClose} className="text-sm border border-[#E3E0D8] text-[#3D3C38] px-4 py-2 rounded-md hover:bg-white transition-all flex items-center gap-1.5">
-          ← Return to Learning Node
+function EvidenceCard({
+  evidence,
+  number,
+  onSave,
+}: {
+  evidence: Evidence
+  number: number
+  onSave: () => void
+}) {
+  return (
+    <article className="mb-4 rounded-lg border border-[#E3E0D8] bg-white p-4">
+      <p className="text-xs font-medium">
+        [{number}] {evidence.title}
+      </p>
+      <p className="mt-1 text-[10px] text-[#A8A5A0]">
+        {evidence.kind}
+        {evidence.location ? ` · ${evidence.location}` : ''}
+      </p>
+      <blockquote className="my-3 whitespace-pre-wrap border-l-2 border-[#C5D9C4] pl-3 text-xs leading-relaxed text-[#7A7870]">
+        {evidence.excerpt}
+      </blockquote>
+      <div className="flex items-center justify-between gap-2">
+        {evidence.url && (
+          <a
+            href={evidence.url}
+            target="_blank"
+            rel="noreferrer"
+            className="text-xs text-[#4A5FA5]"
+          >
+            Open source ↗
+          </a>
+        )}
+        <button className="text-xs text-[#5B7A58]" onClick={onSave}>
+          Save excerpt
         </button>
-        <button onClick={onSave} className="text-sm border border-[#C5D9C4] text-[#5B7A58] bg-[#EFF4EE] px-4 py-2 rounded-md hover:bg-[#E3EEE2] transition-colors">
-          Save Insight to Notebook
-        </button>
       </div>
-    </div>
+    </article>
   )
 }

@@ -1,0 +1,228 @@
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+from sqlmodel import select
+
+from trellis import ai, core
+from trellis.models import Interaction, LearningPath, Node, Thread
+
+
+def create_path(client, title="Learn Python"):
+    response = client.post("/api/paths", json={"input": title})
+    assert response.status_code == 201, response.text
+    return response.json()
+
+
+def test_empty_workspace_has_explicit_resume_location(client):
+    result = client.get("/api/workspace")
+    assert result.status_code == 200
+    assert result.json()["location"] == {"path_id": None, "node_id": None, "thread_id": None}
+
+
+def test_curriculum_edits_reorder_and_progress_survive_new_client(client, stub_ai):
+    path = create_path(client)
+    first, second, third = [node["id"] for node in path["nodes"]]
+    assert client.patch(f"/api/nodes/{second}/progress", json={"status": "completed"}).status_code == 200
+    assert client.patch(f"/api/nodes/{second}", json={"title": "Python lists"}).status_code == 200
+    reordered = client.post(f"/api/paths/{path['id']}/reorder", json={"node_ids": [first, third, second]})
+    assert reordered.status_code == 200
+    reopened = TestClient(client.app).get(f"/api/paths/{path['id']}").json()
+    assert [node["id"] for node in reopened["nodes"]] == [first, third, second]
+    assert reopened["nodes"][2]["title"] == "Python lists"
+    assert reopened["nodes"][2]["status"] == "completed"
+    assert reopened["progress"] == 33
+    client.post(f"/api/nodes/{second}/interactions", json={"prompt": "Explain this node"})
+    assert stub_ai[-1]["node_position"] == 2
+    assert stub_ai[-1]["node_count"] == 3
+
+
+def test_multiple_nodes_and_threads_never_mix_histories(client, stub_ai):
+    path = create_path(client)
+    node_a, node_b = [node["id"] for node in path["nodes"][:2]]
+    main = client.post(f"/api/nodes/{node_a}/interactions", json={"prompt": "Primary question"}).json()
+    client.post(f"/api/nodes/{node_b}/interactions", json={"prompt": "Other node secret"})
+    thread_a = client.post(f"/api/nodes/{node_a}/threads", json={"title": "Tangent A", "interaction_id": main["id"]}).json()
+    thread_b = client.post(f"/api/nodes/{node_a}/threads", json={"title": "Tangent B"}).json()
+    location = {"path_id": path["id"], "node_id": node_a, "thread_id": None}
+    client.put("/api/location", json=location)
+    before = client.get(f"/api/nodes/{node_a}").json()
+    client.post(f"/api/threads/{thread_a['id']}/interactions", json={"prompt": "Thread A secret"})
+    client.post(f"/api/threads/{thread_b['id']}/interactions", json={"prompt": "Thread B secret"})
+    client.post(f"/api/threads/{thread_a['id']}/interactions", json={"prompt": "Continue A"})
+    context = stub_ai[-1]
+    assert [item["prompt"] for item in context["history"]] == ["Thread A secret"]
+    assert "Primary question" in context["seed_context"]
+    after = client.get(f"/api/nodes/{node_a}").json()
+    assert after["interactions"] == before["interactions"]
+    assert after["node"] == before["node"]
+    assert client.get("/api/workspace").json()["location"] == location
+    client.post(f"/api/nodes/{node_a}/interactions", json={"prompt": "Back to primary"})
+    assert [item["prompt"] for item in stub_ai[-1]["history"]] == ["Primary question"]
+
+
+def test_resume_thread_and_closed_thread_rules(client, stub_ai):
+    path = create_path(client)
+    node = path["nodes"][0]["id"]
+    thread = client.post(f"/api/nodes/{node}/threads", json={"title": "Exploration"}).json()
+    location = {"path_id": path["id"], "node_id": node, "thread_id": thread["id"]}
+    assert client.put("/api/location", json=location).status_code == 200
+    assert TestClient(client.app).get("/api/workspace").json()["location"] == location
+    assert len(client.get("/api/learning-sessions").json()) == 1
+    start = client.get("/api/learning-sessions").json()[0]["last_active_at"]
+    client.patch(f"/api/nodes/{node}/progress", json={"status": "not_started"})
+    assert client.get("/api/learning-sessions").json()[0]["last_active_at"] > start
+    assert client.post("/api/learning-sessions/end").json()["ended_at"]
+    client.patch(f"/api/threads/{thread['id']}", json={"status": "closed"})
+    assert client.post(f"/api/threads/{thread['id']}/interactions", json={"prompt": "Hello"}).status_code == 409
+    client.patch(f"/api/threads/{thread['id']}", json={"status": "open"})
+    assert client.post(f"/api/threads/{thread['id']}/interactions", json={"prompt": "Hello"}).status_code == 201
+    assert client.get(f"/api/nodes/{node}").json()["node"]["status"] == "not_started"
+
+
+def test_invalid_relationships_and_destructive_edits_are_rejected(client, stub_ai):
+    path = create_path(client)
+    other = create_path(client, "Learn SQL")
+    parent, child, leaf = [node["id"] for node in path["nodes"]]
+    foreign = other["nodes"][0]["id"]
+    assert client.patch(f"/api/nodes/{parent}", json={"parent_id": child}).status_code == 422
+    assert client.patch(f"/api/nodes/{child}", json={"parent_id": foreign}).status_code == 422
+    assert client.put("/api/location", json={"path_id": path["id"], "node_id": foreign}).status_code == 422
+    assert client.post(f"/api/paths/{path['id']}/reorder", json={"node_ids": [parent, child, child]}).status_code == 422
+    assert client.delete(f"/api/nodes/{parent}").status_code == 409
+    client.post(f"/api/nodes/{child}/interactions", json={"prompt": "Explain"})
+    assert client.delete(f"/api/nodes/{child}").status_code == 409
+    assert client.delete(f"/api/nodes/{leaf}").status_code == 204
+
+
+def test_failed_generation_preserves_prior_state(client, session, stub_ai, monkeypatch):
+    path = create_path(client)
+    node = path["nodes"][0]["id"]
+    client.post(f"/api/nodes/{node}/interactions", json={"prompt": "Explain"})
+    def fail(*args):
+        raise HTTPException(503, "Provider unavailable")
+    monkeypatch.setattr(ai, "answer", fail)
+    assert client.post(f"/api/nodes/{node}/interactions", json={"prompt": "Continue"}).status_code == 503
+    assert len(session.exec(select(Interaction)).all()) == 1
+    assert len(client.get(f"/api/nodes/{node}").json()["interactions"]) == 1
+
+
+def test_malformed_curriculum_never_creates_partial_path(client, session, stub_ai, monkeypatch):
+    monkeypatch.setattr(ai, "generate_curriculum", lambda *args: {
+        "title": "Invalid", "nodes": [{"title": "Loop", "parent_index": 0}]})
+    assert client.post("/api/paths", json={"input": "Learn Python"}).status_code == 502
+    assert session.exec(select(LearningPath)).all() == []
+    assert client.post("/api/paths", json={"input": "   "}).status_code == 422
+
+
+def test_overview_preserves_last_study_location_and_switching_paths_restores_it(client, stub_ai):
+    first = create_path(client)
+    node_id = first["nodes"][1]["id"]
+    thread = client.post(f"/api/nodes/{node_id}/threads", json={"title": "Tuple comparisons"}).json()
+    location = {"path_id": first["id"], "node_id": node_id, "thread_id": thread["id"]}
+    assert client.put("/api/location", json=location).json() == location
+    assert client.put("/api/location", json={"path_id": first["id"]}).json() == location
+    detail = client.get("/api/workspace").json()["location_detail"]
+    assert detail == {"path_title": "Learn Python", "node_title": "Sequences",
+                      "thread_title": "Tuple comparisons"}
+
+    second = create_path(client, "Learn databases")
+    other_location = {"path_id": second["id"], "node_id": second["nodes"][0]["id"], "thread_id": None}
+    client.put("/api/location", json=other_location)
+    assert client.put("/api/location", json={"path_id": first["id"]}).json() == location
+    periods = client.get("/api/learning-sessions").json()
+    assert len([period for period in periods if period["ended_at"] is None]) == 1
+    assert client.put("/api/location", json={"path_id": first["id"], "node_id": None}).json() == {
+        "path_id": first["id"], "node_id": None, "thread_id": None,
+    }
+
+
+def test_curriculum_evidence_snapshot_survives_node_edits(client, stub_ai, monkeypatch):
+    draft = ai.generate_curriculum(None, "Learn Python", "goal", [])
+    evidence = [{"id": "E1", "title": "Python documentation", "excerpt": "Lists hold items."}]
+    generation = {"mode": "goal", "provider": "test", "model": "fixture", "evidence": evidence,
+                  "evaluation": {"status": "passed", "supported": True}, "created_at": "2026-09-25T00:00:00Z"}
+    draft["generation"] = generation
+    draft["nodes"][0]["evidence_ids"] = ["E1"]
+    monkeypatch.setattr(ai, "generate_curriculum", lambda *args: draft)
+    path = create_path(client)
+    node_id = path["nodes"][0]["id"]
+    client.patch(f"/api/nodes/{node_id}", json={"title": "My foundation notes"})
+    loaded = TestClient(client.app).get(f"/api/paths/{path['id']}").json()
+    assert loaded["generation"] == generation
+    assert loaded["nodes"][0]["evidence_ids"] == ["E1"]
+    assert "generation" not in client.get("/api/paths").json()[0]
+
+
+def test_legacy_abstention_diagnostics_are_not_reused_as_teaching_history(client, session, stub_ai):
+    path = create_path(client)
+    node = session.get(Node, path["nodes"][0]["id"])
+    session.add(Interaction(path_id=path["id"], node_id=node.id, prompt="Explain more",
+                            content="Internal review: raw UUID and unsupported comparison.", status="abstained"))
+    session.commit()
+    context = core.build_context(session, node)
+    assert context["history"][0]["prompt"] == "Explain more"
+    assert "withheld" in context["history"][0]["content"]
+    assert "raw UUID" not in context["history"][0]["content"]
+
+
+def test_new_threads_keep_withheld_questions_without_diagnostic_content(client, session, stub_ai):
+    path = create_path(client)
+    node_id = path["nodes"][0]["id"]
+    source = Interaction(
+        path_id=path["id"], node_id=node_id, prompt="Compare these approaches",
+        content="Internal review: unsupported claim from 9fd2c6b5-bc5a-49df-8fc4-6f4c6c7b0ec1.",
+        status="abstained",
+    )
+    session.add(source)
+    session.commit()
+    response = client.post(f"/api/nodes/{node_id}/threads", json={
+        "title": "Explore the comparison", "interaction_id": source.id,
+    })
+    assert response.status_code == 201
+    thread = response.json()
+    assert source.prompt in thread["seed_context"]
+    assert core.WITHHELD_ANSWER in thread["seed_context"]
+    assert source.content not in thread["seed_context"]
+    result = client.post(f"/api/threads/{thread['id']}/interactions", json={"prompt": "Explain further"})
+    assert result.status_code == 201
+    assert stub_ai[-1]["seed_context"] == thread["seed_context"]
+    assert source.content not in str(stub_ai[-1])
+    assert client.get(f"/api/nodes/{node_id}").json()["interactions"][0]["content"] == source.content
+
+
+def test_legacy_thread_seeds_are_sanitized_without_changing_accepted_or_saved_content(client, session, stub_ai):
+    path = create_path(client)
+    node = session.get(Node, path["nodes"][0]["id"])
+    sources = [
+        Interaction(path_id=path["id"], node_id=node.id, prompt="Explain the comparison",
+                    content="Internal review: raw UUID and unsupported comparison.", status="abstained"),
+        Interaction(path_id=path["id"], node_id=node.id, prompt="Explain the supported example",
+                    content="Accepted, source-supported explanation.", status="answered"),
+    ]
+    session.add_all(sources)
+    session.commit()
+    threads = []
+    for source in sources:
+        seed = (f"Origin topic: {node.title}. {node.description}"
+                f"\nStarting question: {source.prompt}\nStarting explanation: {source.content}")
+        thread = Thread(path_id=path["id"], node_id=node.id, title=source.prompt, seed_context=seed)
+        session.add(thread)
+        threads.append(thread)
+    # The original response may be older than the current bounded message history.
+    for index in range(13):
+        session.add(Interaction(path_id=path["id"], node_id=node.id, prompt=f"Later question {index}",
+                                content="Later answer", status="answered"))
+    session.commit()
+    saved_seeds = [thread.seed_context for thread in threads]
+    for thread in threads:
+        result = client.post(f"/api/threads/{thread.id}/interactions", json={"prompt": "Continue"})
+        assert result.status_code == 201
+        context = stub_ai[-1]
+        assert thread.title in context["seed_context"]
+        assert "Internal review:" not in str(context)
+    assert core.WITHHELD_ANSWER in stub_ai[-2]["seed_context"]
+    assert stub_ai[-1]["seed_context"] == saved_seeds[1]
+    for thread, original in zip(threads, saved_seeds, strict=True):
+        session.refresh(thread)
+        assert thread.seed_context == original
+    session.refresh(sources[0])
+    assert sources[0].content == "Internal review: raw UUID and unsupported comparison."

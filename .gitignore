@@ -1,2 +1,14 @@
 tmp
 .DS_Store
+.env
+.env.*
+!.env.example
+.data/
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+*.pyc
+test-results/
+playwright-report/
+.pnpm-store/
