@@ -22,7 +22,7 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://trellis:trellis@db:5432/trellis
       DATA_DIR: /data
-      OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434/v1}
     ports:
       - "127.0.0.1:8100:8000"
     volumes:

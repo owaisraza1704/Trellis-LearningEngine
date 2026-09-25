@@ -2,7 +2,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field as InputField, model_validator
-from sqlalchemy import func
+from sqlalchemy import func, update
 from sqlmodel import Session, select
 
 from . import ai
@@ -371,9 +371,10 @@ def interact(session: Session, node: Node, body: MessageInput, thread: Thread | 
                               action=body.action, **result)
     session.add(interaction)
     # Thread conversations never mutate primary-node progress or location.
-    if not thread and node.status == "not_started":
-        node.status = "in_progress"
-        session.add(node)
+    if not thread:
+        # Progress may have changed in another request while the answer was generated.
+        session.exec(update(Node).where(Node.id == node.id, Node.status == "not_started")
+                     .values(status="in_progress"))
     activity(session, "thread_interaction" if thread else "interaction", body.prompt[:160],
              node=node, thread=thread)
     session.commit()

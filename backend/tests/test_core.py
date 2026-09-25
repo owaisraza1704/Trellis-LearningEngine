@@ -1,6 +1,7 @@
+import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
-from sqlmodel import select
+from sqlmodel import Session, select
 
 from trellis import ai, core
 from trellis.models import Interaction, LearningPath, Node, Thread
@@ -33,6 +34,32 @@ def test_curriculum_edits_reorder_and_progress_survive_new_client(client, stub_a
     client.post(f"/api/nodes/{second}/interactions", json={"prompt": "Explain this node"})
     assert stub_ai[-1]["node_position"] == 2
     assert stub_ai[-1]["node_count"] == 3
+
+
+@pytest.mark.parametrize("manual_status", [None, "completed", "in_progress"])
+def test_first_answer_respects_progress_changed_while_generating(
+    client, db_engine, stub_ai, monkeypatch, manual_status,
+):
+    path = create_path(client)
+    node_id = path["nodes"][0]["id"]
+    answer = ai.answer
+
+    def answer_while_progress_changes(session, context, prompt):
+        assert session.get(Node, node_id).status == "not_started"
+        if manual_status:
+            # The learner's separate request commits while answer generation is pending.
+            with Session(db_engine) as progress_session:
+                core.update_progress(node_id, core.ProgressInput(status=manual_status), progress_session)
+        return answer(session, context, prompt)
+
+    monkeypatch.setattr(ai, "answer", answer_while_progress_changes)
+    response = client.post(f"/api/nodes/{node_id}/interactions", json={"prompt": "Explain this topic"})
+    assert response.status_code == 201
+    with Session(db_engine) as reopened:
+        assert reopened.get(Node, node_id).status == (manual_status or "in_progress")
+        interaction = reopened.get(Interaction, response.json()["id"])
+        assert interaction.node_id == node_id
+        assert interaction.status == "answered"
 
 
 def test_multiple_nodes_and_threads_never_mix_histories(client, stub_ai):

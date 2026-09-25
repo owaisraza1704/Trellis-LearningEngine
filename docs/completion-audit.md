@@ -25,6 +25,10 @@ This audit uses the approved synopsis, `tmp/requirements.md`, `tmp/implementatio
 | Following “Review sources” could create an unattached source | Default Sources to the current journey so new material is available to the requesting node. |
 | Notebook saves left activity timestamps stale | Use the same activity update path as learning interactions. |
 | Curriculum generation lacked stored evidence/evaluation provenance | Validate per-topic citations and source support, or supplied-outline fidelity; freeze the original output, evidence, model, and assessment. Label older unrecorded generations honestly. |
+| An answer finishing could overwrite a concurrent completion change | Advance progress with a conditional database update only when the stored node is still not started; preserve the learner's completed/in-progress state. |
+| A response arriving could erase an unsent follow-up question | Clear only the unchanged text of a successful composer submission; preserve newer drafts, failed submissions and text prepared while using quick actions. |
+| Docker ignored a custom Ollama endpoint from `.env` | Honor `OLLAMA_BASE_URL` when supplied and otherwise use the standard Docker-to-laptop address; document container-reachable custom URLs. |
+| Starting another thread promised context it did not include | When creating a thread from within another thread, name the primary topic as its starting context. Selected primary-node responses remain included when starting there. |
 
 ## Functional requirement coverage
 
