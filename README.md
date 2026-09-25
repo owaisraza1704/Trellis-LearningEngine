@@ -38,9 +38,9 @@ Settings supports **Azure OpenAI, OpenAI, OpenRouter, and Ollama**. Set credenti
 | Azure OpenAI | `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_API_VERSION`, `AZURE_OPENAI_MODEL` (the deployment name) |
 | OpenAI | `OPENAI_API_KEY`, `OPENAI_MODEL`; optional `OPENAI_BASE_URL` |
 | OpenRouter | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`; optional `OPENROUTER_BASE_URL` |
-| Ollama | `OLLAMA_BASE_URL` (default `http://localhost:11434/v1`) and `OLLAMA_MODEL`; install/pull the chosen model in Ollama first |
+| Ollama | Optional `OLLAMA_BASE_URL` and `OLLAMA_MODEL`; install/pull the chosen model in Ollama first |
 
-The configured Azure deployment names are used exactly as supplied. Selecting a chat provider does not discard saved content or change the embedding model. For Docker on macOS, Ollama is reached through `host.docker.internal`.
+The configured Azure deployment names are used exactly as supplied. Selecting a chat provider does not discard saved content or change the embedding model. Leave `OLLAMA_BASE_URL` unset for the standard local Ollama service: native mode uses `http://localhost:11434/v1`, and Docker uses `http://host.docker.internal:11434/v1`. An explicit `.env` URL overrides the default. In Docker it must be reachable from the container; for a custom laptop port, use a URL such as `http://host.docker.internal:11435/v1`. `localhost` inside a container refers to that container. After changing `.env` in Docker, run `docker compose --profile app up -d --wait` to recreate the backend with the new setting.
 
 Embeddings are configured independently with `EMBEDDING_PROVIDER`, `EMBEDDING_MODEL`, and `EMBEDDING_DIMENSIONS`. Azure defaults to `AZURE_OPENAI_EMBEDDING_DEPLOYMENT` and `AZURE_OPENAI_EMBEDDING_DIMENSIONS`. For Ollama embeddings, set the model and its actual dimension (for example, `nomic-embed-text` and `768`). After changing the embedding configuration, reindex existing sources in Sources. Vectors from different configured profiles are never compared. The initial local corpus uses exact pgvector cosine search; it does not need an approximate vector index.
 

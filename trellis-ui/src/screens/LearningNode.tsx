@@ -98,14 +98,23 @@ function NodeWorkspace({
   const active =
     interactions.find((item) => item.id === selected) || interactions[interactions.length - 1]
   const send = useMutation({
-    mutationFn: ({ text, action = 'question' }: { text: string; action?: string }) =>
+    mutationFn: ({
+      text,
+      action = 'question',
+    }: {
+      text: string
+      action?: string
+      fromComposer?: boolean
+    }) =>
       api<Interaction>(
         threadId ? `/threads/${threadId}/interactions` : `/nodes/${nodeId}/interactions`,
         'POST',
         { prompt: text, action },
       ),
-    onSuccess: (data) => {
-      setPrompt('')
+    onSuccess: (data, variables) => {
+      if (variables.fromComposer) {
+        setPrompt((current) => (current === variables.text ? '' : current))
+      }
       setSelected(data.id)
       client.invalidateQueries({
         queryKey: [threadId ? 'thread' : 'node', threadId || nodeId],
@@ -539,7 +548,7 @@ function NodeWorkspace({
               className="mt-4 border-t border-[#E3E0D8] pt-3"
               onSubmit={(event) => {
                 event.preventDefault()
-                if (prompt.trim()) send.mutate({ text: prompt })
+                if (prompt.trim()) send.mutate({ text: prompt, fromComposer: true })
               }}
             >
               <label className="sr-only" htmlFor="node-question">
@@ -638,9 +647,10 @@ function NodeWorkspace({
             }}
           >
             <p className="mb-4 text-sm text-[#7A7870]">
-              A separate conversation starts from this topic
-              {active ? ' and the selected response' : ''}. It will not change your primary learning
-              progress.
+              {threadId
+                ? `A separate conversation starts from the primary topic, ${current.title}.`
+                : `A separate conversation starts from this topic${active ? ' and the selected response' : ''}.`}{' '}
+              It will not change your primary learning progress.
             </p>
             <label htmlFor="thread-title" className="field-label">
               What would you like to explore?

@@ -26,7 +26,7 @@ The path, its nodes, selected sources, initial location, and creation activity a
 | Exploratory thread | Interactions match one thread; its saved seed gives the starting context. |
 | Withheld answers | Questions remain available for continuity, but rejected answer text is excluded from model history and thread seeds. Existing legacy seeds are sanitized when building context without changing the saved records. |
 | Thread activity | Does not change primary-node messages, completion state, or workspace location. Navigation changes location explicitly. |
-| Progress | `not_started`, `in_progress`, or `completed`; the first primary interaction marks an unstarted node in progress, and the learner controls completion. Path progress is the rounded percentage of completed nodes. It is not a mastery estimate. |
+| Progress | `not_started`, `in_progress`, or `completed`; the first primary interaction conditionally advances a row still marked not started in the database. A concurrent completion change is preserved. Path progress is the rounded percentage of completed nodes. It is not a mastery estimate. |
 | Navigation | A saved thread must belong to the saved node, and the node must belong to the saved path. |
 | Sources | Retrieval uses sources attached to the current path, or explicitly selected unattached sources while creating a path. |
 | Notebook | Saved response/excerpt origin and evidence copies remain unchanged when a learner edits or moves the retained text. |
@@ -36,6 +36,8 @@ The path, its nodes, selected sources, initial location, and creation activity a
 Learning activity records preserve the path, node, thread, activity label, and timestamp. Learning-session records capture an explicit study period and its last location; the learner can end a period from History. These differ from study selections, which are ordered reading sets used for review and export.
 
 Route changes persist node/thread study location, including browser Back/Forward and direct links. TanStack Query serializes location writes so a slower earlier navigation cannot overwrite the most recent destination. A path-only selection preserves its existing study location, or restores that path's last learning-session location when switching journeys. Opening the curriculum therefore does not clear the node/thread that Home resumes.
+
+The question composer remains editable during generation. A successful composer submission clears its text only if it has not been replaced by a new draft. Quick actions and failed requests leave the composer untouched.
 
 Each learning journey owns one notebook across visits. The notebook is the collection of that journey's **sections**, so a second notebook entity or creation flow is unnecessary. The database and API retain the existing `NotebookPage` name for sections. Sections, notes, study selections, and exports carry their journey's `path_id`. The API rejects foreign-journey origins, section moves, selection IDs and export IDs; the UI also queries only the chosen journey. Personal notes inherit the section's journey without inventing an originating node. A section can contain many notes; PDF pagination is a separate rendering concern. Saving a response requires an accepted answer, while evidence excerpts and personal notes can be retained independently. Saving a scoped note records its origin and updates the journey and study-session activity timestamps.
 

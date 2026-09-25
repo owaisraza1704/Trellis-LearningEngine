@@ -653,3 +653,135 @@ test('an empty workspace offers journey selection without requesting a global no
   ).toBeVisible()
   expect(requests.every((url) => url === '/api/workspace')).toBe(true)
 })
+
+for (const scenario of [
+  {
+    name: 'clears an unchanged question after success',
+    quickAction: false,
+    nextDraft: null,
+    fails: false,
+  },
+  {
+    name: 'keeps a follow-up typed before the answer arrives',
+    quickAction: false,
+    nextDraft: 'What about acceleration?',
+    fails: false,
+  },
+  {
+    name: 'keeps a prepared question when a quick action finishes',
+    quickAction: true,
+    nextDraft: null,
+    fails: false,
+  },
+  {
+    name: 'keeps the submitted question after a failed answer',
+    quickAction: false,
+    nextDraft: null,
+    fails: true,
+  },
+  {
+    name: 'keeps a newer question after a failed answer',
+    quickAction: false,
+    nextDraft: 'What about acceleration?',
+    fails: true,
+  },
+]) {
+  test(`question composer ${scenario.name}`, async ({ page }) => {
+    const interactions = [answer]
+    // Matching the quick-action text also checks that it cannot consume an unsent draft.
+    const submitted = scenario.quickAction
+      ? 'Explain Motion in more depth.'
+      : 'How is speed different?'
+    let request: { prompt: string; action: string } | undefined
+    let release!: () => void
+    const pendingResponse = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await page.route('**/api/**', async (route) => {
+      const url = new URL(route.request().url()).pathname
+      if (url === '/api/workspace') return route.fulfill({ json: workspace })
+      if (url === '/api/location') return route.fulfill({ json: workspace.location })
+      if (url === `/api/nodes/${node.id}`)
+        return route.fulfill({ json: { node, path, nodes: [node], interactions, threads: [] } })
+      if (url === `/api/nodes/${node.id}/interactions`) {
+        request = route.request().postDataJSON()
+        await pendingResponse
+        if (scenario.fails)
+          return route.fulfill({
+            status: 503,
+            json: { detail: 'The model is temporarily unavailable.' },
+          })
+        const accepted = { ...answer, id: 'delayed-answer', prompt: request!.prompt }
+        interactions.push(accepted)
+        return route.fulfill({ json: accepted })
+      }
+      return route.fulfill({ status: 404, json: { detail: `Unexpected ${url}` } })
+    })
+    await page.goto(`/?screen=node&path=${path.id}&node=${node.id}`)
+    const composer = page.getByLabel('Ask about this topic', { exact: true })
+    await composer.fill(submitted)
+    await page
+      .getByRole('button', {
+        name: scenario.quickAction ? 'Go deeper' : 'Ask Trellis',
+        exact: true,
+      })
+      .click()
+    await expect(page.getByRole('button', { name: 'Thinking…', exact: true })).toBeDisabled()
+    await expect(composer).toBeEnabled()
+    await expect
+      .poll(() => request)
+      .toEqual({ prompt: submitted, action: scenario.quickAction ? 'deeper' : 'question' })
+    if (scenario.nextDraft) await composer.fill(scenario.nextDraft)
+    release()
+    if (scenario.fails)
+      await expect(
+        page.getByRole('alert').filter({ hasText: 'The model is temporarily unavailable.' }),
+      ).toBeVisible()
+    else await expect(page.getByRole('heading', { name: submitted, exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Ask Trellis', exact: true })).toBeVisible()
+    const expectedDraft =
+      scenario.nextDraft ?? (scenario.fails || scenario.quickAction ? submitted : '')
+    await expect(composer).toHaveValue(expectedDraft)
+  })
+}
+
+test('new thread describes the primary topic when opened inside an existing thread', async ({
+  page,
+}) => {
+  const thread = {
+    id: 'motion-thread',
+    path_id: path.id,
+    node_id: node.id,
+    title: 'Circular motion',
+    status: 'open',
+    seed_context: '',
+    created_at: answer.created_at,
+  }
+  await page.route('**/api/**', async (route) => {
+    const url = new URL(route.request().url()).pathname
+    if (url === '/api/workspace') return route.fulfill({ json: workspace })
+    if (url === '/api/location') return route.fulfill({ json: workspace.location })
+    if (url === `/api/nodes/${node.id}`)
+      return route.fulfill({
+        json: { node, path, nodes: [node], interactions: [answer], threads: [thread] },
+      })
+    if (url === `/api/threads/${thread.id}`)
+      return route.fulfill({
+        json: {
+          thread,
+          node,
+          path,
+          interactions: [{ ...answer, id: 'thread-answer', thread_id: thread.id }],
+        },
+      })
+    return route.fulfill({ status: 404, json: { detail: `Unexpected ${url}` } })
+  })
+  await page.goto(`/?screen=node&path=${path.id}&node=${node.id}`)
+  await page.getByRole('button', { name: 'New exploratory thread', exact: true }).click()
+  await expect(page.getByRole('dialog')).toContainText('this topic and the selected response')
+  await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
+  await page.goto(`/?screen=node&path=${path.id}&node=${node.id}&thread=${thread.id}`)
+  await page.getByRole('button', { name: 'New exploratory thread', exact: true }).click()
+  await expect(page.getByRole('dialog')).toContainText('starts from the primary topic, Motion.')
+  await expect(page.getByRole('dialog')).not.toContainText('selected response')
+})
