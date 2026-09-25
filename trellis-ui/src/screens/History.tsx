@@ -1,116 +1,118 @@
-interface HistoryProps {
-  onNavigate: (screen: string) => void
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowRight, Clock } from 'lucide-react'
+import { api, date, type Activity, type Navigate } from '../lib/api'
+import { Empty, ErrorNotice, Loading, Status } from '../components/ui'
+
+interface LearningSession {
+  id: string
+  path_id: string
+  node_id?: string
+  thread_id?: string
+  started_at: string
+  last_active_at: string
+  ended_at?: string
 }
-
-const historyItems = [
-  {
-    date: 'Today',
-    entries: [
-      { title: 'Logistic Regression', type: 'Learning Node', journey: 'Machine Learning', duration: '42 min', time: '10:32 AM', status: 'in-progress' },
-      { title: 'History of Logistic Regression', type: 'Exploratory Thread', journey: 'Machine Learning', duration: '18 min', time: '09:14 AM', status: 'completed' },
-    ],
-  },
-  {
-    date: 'Yesterday',
-    entries: [
-      { title: 'Linear Regression', type: 'Learning Node', journey: 'Machine Learning', duration: '31 min', time: '03:20 PM', status: 'completed' },
-      { title: 'Probability', type: 'Learning Node', journey: 'Machine Learning', duration: '22 min', time: '02:40 PM', status: 'completed' },
-    ],
-  },
-  {
-    date: 'September 18',
-    entries: [
-      { title: 'Load Balancing', type: 'Learning Node', journey: 'System Design', duration: '25 min', time: '11:05 AM', status: 'completed' },
-      { title: 'CAP Theorem', type: 'Learning Node', journey: 'System Design', duration: '19 min', time: '10:30 AM', status: 'completed' },
-    ],
-  },
-  {
-    date: 'September 16',
-    entries: [
-      { title: 'ORM Relationships', type: 'Learning Node', journey: 'Django', duration: '35 min', time: '04:00 PM', status: 'completed' },
-    ],
-  },
-]
-
-const typeIcon: Record<string, string> = {
-  'Learning Node': '◈',
-  'Exploratory Thread': '↗',
-}
-
-export default function History({ onNavigate }: HistoryProps) {
+export default function History({ onNavigate }: { onNavigate: Navigate }) {
+  const client = useQueryClient()
+  const history = useQuery({
+    queryKey: ['history'],
+    queryFn: () => api<Activity[]>('/history'),
+  })
+  const sessions = useQuery({
+    queryKey: ['learning-sessions'],
+    queryFn: () => api<LearningSession[]>('/learning-sessions'),
+  })
+  const endSession = useMutation({
+    mutationFn: () => api('/learning-sessions/end', 'POST'),
+    onSuccess: () => {
+      client.invalidateQueries({ queryKey: ['learning-sessions'] })
+      client.invalidateQueries({ queryKey: ['history'] })
+    },
+  })
+  const active = sessions.data?.find((session) => !session.ended_at)
   return (
-    <div className="screen-enter max-w-2xl">
+    <div className="screen-enter mx-auto max-w-3xl">
       <div className="mb-7">
-        <h1 className="font-display text-3xl font-light text-[#1A1916] mb-1">Learning History</h1>
-        <p className="text-sm text-[#7A7870]">Everything you've studied, in order.</p>
+        <h1 className="font-display text-3xl font-light">Learning history</h1>
+        <p className="mt-1 text-sm text-[#7A7870]">
+          Your learning activity, connected to where it happened.
+        </p>
       </div>
-
-      {/* Resume banner */}
-      <div className="bg-white border border-[#E3E0D8] rounded-xl p-4 mb-7 flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="w-2 h-2 rounded-full bg-[#4A5FA5] inline-block flex-shrink-0"></span>
+      <ErrorNotice error={history.error || sessions.error || endSession.error} />
+      {active && (
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#C5D9C4] bg-[#EFF4EE] p-5">
           <div>
-            <p className="text-sm font-medium text-[#1A1916]">Continue where you left off</p>
-            <p className="text-xs text-[#7A7870]">Logistic Regression · 42 min in · 2 hours ago</p>
+            <p className="text-sm font-medium text-[#5B7A58]">Current study session</p>
+            <p className="mt-1 text-xs text-[#7A7870]">Started {date(active.started_at)}</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              className="btn-secondary"
+              disabled={endSession.isPending}
+              onClick={() => endSession.mutate()}
+            >
+              End session
+            </button>
+            <button
+              className="btn"
+              onClick={() => onNavigate(active.node_id ? 'node' : 'graph', active)}
+            >
+              Resume <ArrowRight size={13} />
+            </button>
           </div>
         </div>
-        <button
-          onClick={() => onNavigate('node')}
-          className="text-xs bg-[#2D2C28] text-white px-4 py-2 rounded-md hover:bg-[#1A1916] transition-colors"
-        >
-          Resume →
-        </button>
-      </div>
-
-      {/* Timeline */}
-      <div className="space-y-7">
-        {historyItems.map((group) => (
-          <div key={group.date}>
-            <p className="text-xs font-medium text-[#A8A5A0] uppercase tracking-widest mb-3">{group.date}</p>
-            <div className="space-y-2">
-              {group.entries.map((entry, i) => (
-                <div
-                  key={i}
-                  className="bg-white border border-[#E3E0D8] rounded-lg p-4 flex items-center gap-4 hover:border-[#B8B5AD] transition-all group"
-                >
-                  <div className="w-8 h-8 rounded-lg bg-[#F0EEE9] flex items-center justify-center text-sm text-[#7A7870] flex-shrink-0">
-                    {typeIcon[entry.type] || '◈'}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <p className="text-sm font-medium text-[#1A1916] truncate">{entry.title}</p>
-                      {entry.status === 'in-progress' && (
-                        <span className="text-xs text-[#4A5FA5] bg-[#EEF0F9] border border-[#C5CEED] px-1.5 py-0.5 rounded-full flex-shrink-0">in progress</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-[#A8A5A0]">
-                      <span>{entry.type}</span>
-                      <span>·</span>
-                      <span>{entry.journey}</span>
-                      <span>·</span>
-                      <span>{entry.time}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <span className="text-xs text-[#A8A5A0] font-mono">{entry.duration}</span>
-                    <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        onClick={() => onNavigate('node')}
-                        className="text-xs text-[#5B7A58] border border-[#C5D9C4] bg-[#EFF4EE] px-2.5 py-1 rounded hover:bg-[#E3EEE2] transition-colors"
-                      >
-                        Resume
-                      </button>
-                      <button className="text-xs text-[#7A7870] border border-[#E3E0D8] px-2.5 py-1 rounded hover:bg-[#F0EEE9] transition-colors">
-                        View
-                      </button>
-                    </div>
-                  </div>
+      )}
+      {history.isPending ? (
+        <Loading />
+      ) : history.data?.length === 0 ? (
+        <Empty title="Your journey starts here">
+          <p>Open a learning node, ask a question or save an insight to begin your history.</p>
+        </Empty>
+      ) : (
+        <div className="space-y-3">
+          {history.data?.map((item) => (
+            <button
+              key={item.id}
+              className="flex w-full items-center gap-4 rounded-xl border border-[#E3E0D8] bg-white p-4 text-left hover:border-[#B8B5AD]"
+              onClick={() => onNavigate(item.node_id ? 'node' : 'graph', item)}
+            >
+              <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[#F0EEE9] text-[#5B7A58]">
+                <Clock size={16} />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-sm font-medium">{item.label}</span>
+                <span className="mt-1 block text-xs text-[#A8A5A0]">
+                  {date(item.created_at)} · {item.kind.replaceAll('_', ' ')}
+                </span>
+              </span>
+              <ArrowRight size={14} className="text-[#A8A5A0]" />
+            </button>
+          ))}
+        </div>
+      )}
+      {!!sessions.data?.length && (
+        <section className="mt-8">
+          <h2 className="mb-4 font-display text-xl">Study sessions</h2>
+          <div className="space-y-2">
+            {sessions.data.map((session) => (
+              <div
+                key={session.id}
+                className="flex items-center justify-between gap-3 rounded-lg border border-[#E3E0D8] bg-white p-4"
+              >
+                <div>
+                  <p className="text-sm">{date(session.started_at)}</p>
+                  <p className="mt-1 text-xs text-[#A8A5A0]">
+                    {session.ended_at
+                      ? `Ended ${date(session.ended_at)}`
+                      : `Last activity ${date(session.last_active_at)}`}
+                  </p>
                 </div>
-              ))}
-            </div>
+                <Status value={session.ended_at ? 'closed' : 'open'} />
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+        </section>
+      )}
     </div>
   )
 }

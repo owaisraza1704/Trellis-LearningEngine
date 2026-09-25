@@ -1,0 +1,52 @@
+name: trellis
+services:
+  db:
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: trellis
+      POSTGRES_PASSWORD: trellis
+      POSTGRES_DB: trellis
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - trellis-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trellis -d trellis"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+  backend:
+    profiles: ["app"]
+    build: ./backend
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://trellis:trellis@db:5432/trellis
+      DATA_DIR: /data
+      OLLAMA_BASE_URL: http://host.docker.internal:11434/v1
+    ports:
+      - "127.0.0.1:8100:8000"
+    volumes:
+      - ./.data:/data
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+  frontend:
+    profiles: ["app"]
+    build:
+      context: ./trellis-ui
+      args:
+        API_ORIGIN: http://backend:8000
+    environment:
+      API_ORIGIN: http://backend:8000
+    ports:
+      - "127.0.0.1:3100:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+volumes:
+  trellis-db:

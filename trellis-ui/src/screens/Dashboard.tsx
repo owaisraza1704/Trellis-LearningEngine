@@ -1,222 +1,111 @@
-interface DashboardProps {
-  onNavigate: (screen: string) => void
-}
+import { useQuery } from '@tanstack/react-query'
+import { ArrowRight, Plus } from 'lucide-react'
+import { api, date, type Navigate, type Workspace } from '../lib/api'
+import { Empty, ErrorNotice, Loading } from '../components/ui'
 
-const journeys = [
-  {
-    id: 'ml',
-    title: 'Machine Learning',
-    progress: 42,
-    completedNodes: 18,
-    totalNodes: 43,
-    lastTopic: 'Logistic Regression',
-    lastStudied: '2 hours ago',
-    color: '#5B7A58',
-  },
-  {
-    id: 'sysdesign',
-    title: 'System Design',
-    progress: 28,
-    completedNodes: 11,
-    totalNodes: 39,
-    lastTopic: 'Load Balancing',
-    lastStudied: 'Yesterday',
-    color: '#4A5FA5',
-  },
-  {
-    id: 'django',
-    title: 'Django',
-    progress: 61,
-    completedNodes: 22,
-    totalNodes: 36,
-    lastTopic: 'ORM Relationships',
-    lastStudied: '3 days ago',
-    color: '#7A5B38',
-  },
-  {
-    id: 'networks',
-    title: 'Computer Networks',
-    progress: 15,
-    completedNodes: 6,
-    totalNodes: 40,
-    lastTopic: 'TCP/IP Model',
-    lastStudied: '1 week ago',
-    color: '#5B6A7A',
-  },
-]
-
-const recentNodes = [
-  { title: 'Logistic Regression', journey: 'Machine Learning', time: '2 hours ago', status: 'current' },
-  { title: 'Linear Regression', journey: 'Machine Learning', time: '4 hours ago', status: 'completed' },
-  { title: 'Load Balancing', journey: 'System Design', time: 'Yesterday', status: 'completed' },
-  { title: 'ORM Relationships', journey: 'Django', time: '3 days ago', status: 'completed' },
-]
-
-const savedNotes = [
-  { title: 'Sigmoid function intuition', source: 'Logistic Regression', date: 'Today' },
-  { title: 'Why linear algebra matters for ML', source: 'Linear Algebra', date: 'Yesterday' },
-  { title: 'CAP Theorem explained', source: 'System Design', date: '2 days ago' },
-]
-
-export default function Dashboard({ onNavigate }: DashboardProps) {
+export default function Dashboard({ onNavigate }: { onNavigate: Navigate }) {
+  const { data, error, isPending } = useQuery({
+    queryKey: ['workspace'],
+    queryFn: () => api<Workspace>('/workspace'),
+  })
+  if (isPending) return <Loading />
+  if (!data) return <ErrorNotice error={error} />
+  const active = data.paths.find((path) => path.id === data.location?.path_id)
   return (
-    <div className="screen-enter">
-      {/* Greeting */}
+    <div className="screen-enter max-w-6xl mx-auto">
       <div className="mb-8">
-        <p className="text-xs text-[#A8A5A0] uppercase tracking-widest mb-1">Sunday, September 20</p>
-        <h1 className="font-display text-3xl font-light text-[#1A1916]">Continue learning</h1>
+        <p className="mb-2 text-xs uppercase tracking-widest text-[#A8A5A0]">
+          Your learning workspace
+        </p>
+        <h1 className="font-display text-4xl font-light">Room to grow.</h1>
+        <p className="mt-2 text-sm text-[#7A7870]">
+          Follow a thought. Build understanding. Pick up where you left off.
+        </p>
       </div>
-
-      {/* Active journey hero card */}
-      <div
-        className="bg-white border border-[#E3E0D8] rounded-xl p-6 mb-8 cursor-pointer hover:border-[#B8B5AD] hover:shadow-sm transition-all group"
-        onClick={() => onNavigate('graph')}
-      >
-        <div className="flex items-start justify-between mb-5">
-          <div>
-            <p className="text-xs text-[#7A7870] uppercase tracking-widest mb-1">Active Journey</p>
-            <h2 className="font-display text-2xl font-medium text-[#1A1916]">Machine Learning</h2>
-            <p className="text-sm text-[#7A7870] mt-0.5">Foundations → Mathematics → Supervised Learning</p>
+      <div className="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        {[
+          { label: 'Learning journeys', value: data.stats.paths },
+          { label: 'Learning nodes', value: data.stats.nodes },
+          { label: 'Nodes completed', value: data.stats.completed },
+          { label: 'Notebook items', value: data.stats.notebook_items },
+        ].map((stat) => (
+          <div key={stat.label} className="rounded-xl border border-[#E3E0D8] bg-white px-5 py-4">
+            <p className="font-display text-3xl">{stat.value}</p>
+            <p className="text-xs text-[#A8A5A0]">{stat.label}</p>
           </div>
-          <div className="text-right">
-            <span className="font-display text-3xl font-light text-[#5B7A58]">42%</span>
-            <p className="text-xs text-[#A8A5A0]">18 of 43 nodes</p>
-          </div>
-        </div>
-
-        {/* Progress bar */}
-        <div className="w-full bg-[#EEF0EB] rounded-full h-1.5 mb-5">
-          <div className="bg-[#5B7A58] h-1.5 rounded-full transition-all" style={{ width: '42%' }}></div>
-        </div>
-
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm">
-            <span className="w-2 h-2 rounded-full bg-[#4A5FA5] inline-block"></span>
-            <span className="text-[#1A1916] font-medium">Continue with Logistic Regression</span>
-            <span className="text-[#A8A5A0]">· last studied 2 hours ago</span>
-          </div>
-          <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <button
-              onClick={(e) => { e.stopPropagation(); onNavigate('session') }}
-              className="text-xs text-[#7A7870] border border-[#E3E0D8] px-3 py-2 rounded-md hover:bg-[#F0EEE9] transition-all"
-            >
-              View session
-            </button>
-            <button
-              onClick={(e) => { e.stopPropagation(); onNavigate('node') }}
-              className="text-xs bg-[#2D2C28] text-white px-4 py-2 rounded-md flex items-center gap-1.5"
-            >
-              Continue <span>→</span>
-            </button>
-          </div>
-        </div>
+        ))}
       </div>
-
-      {/* Two-column below */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Learning journeys */}
-        <div className="lg:col-span-2">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-medium text-[#1A1916]">Your Learning Journeys</h3>
+      {active && (
+        <div className="mb-8 rounded-xl border border-[#C5D9C4] bg-[#EFF4EE] p-6">
+          <p className="mb-2 text-xs uppercase tracking-widest text-[#5B7A58]">Continue learning</p>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div>
+              <h2 className="font-display text-2xl">{active.title}</h2>
+              {data.location_detail?.node_title && (
+                <p className="mt-2 text-sm text-[#3D3C38]">
+                  Last studied: {data.location_detail.node_title}
+                  {data.location_detail.thread_title && (
+                    <span className="block mt-1 text-[#4A5FA5]">
+                      Exploring: {data.location_detail.thread_title}
+                    </span>
+                  )}
+                </p>
+              )}
+              <p className="mt-1 text-sm text-[#7A7870]">
+                {active.completed_count} of {active.node_count} nodes completed
+              </p>
+            </div>
             <button
-              onClick={() => onNavigate('create')}
-              className="text-xs text-[#5B7A58] hover:text-[#3D6039] transition-colors flex items-center gap-1"
+              className="btn"
+              onClick={() => onNavigate(data.location.node_id ? 'node' : 'graph', data.location)}
             >
-              + New journey
+              Continue <ArrowRight size={15} />
             </button>
           </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {journeys.map((j) => (
-              <div
-                key={j.id}
-                onClick={() => onNavigate('graph')}
-                className="bg-white border border-[#E3E0D8] rounded-lg p-4 cursor-pointer hover:border-[#B8B5AD] hover:shadow-sm transition-all"
-              >
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <div className="w-2 h-2 rounded-full mb-2" style={{ backgroundColor: j.color }}></div>
-                    <p className="font-medium text-sm text-[#1A1916]">{j.title}</p>
-                  </div>
-                  <span className="text-xs font-mono text-[#7A7870]">{j.progress}%</span>
-                </div>
-                <div className="w-full bg-[#EEF0EB] rounded-full h-1 mb-3">
-                  <div className="h-1 rounded-full transition-all" style={{ width: `${j.progress}%`, backgroundColor: j.color }}></div>
-                </div>
-                <div className="flex items-center justify-between text-xs text-[#A8A5A0]">
-                  <span>{j.completedNodes}/{j.totalNodes} nodes</span>
-                  <span>{j.lastStudied}</span>
-                </div>
-                <p className="text-xs text-[#7A7870] mt-1.5 truncate">Last: {j.lastTopic}</p>
-              </div>
-            ))}
-          </div>
         </div>
-
-        {/* Right panel */}
-        <div className="space-y-5">
-          {/* Recent learning */}
-          <div>
-            <h3 className="text-sm font-medium text-[#1A1916] mb-3">Recent Learning</h3>
-            <div className="space-y-1.5">
-              {recentNodes.map((n, i) => (
+      )}
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="font-display text-xl">Your journeys</h2>
+        <button className="btn-secondary" onClick={() => onNavigate('create')}>
+          <Plus size={15} /> New Journey
+        </button>
+      </div>
+      {data.paths.length === 0 ? (
+        <Empty title="Begin with something you want to understand.">
+          <p className="mb-4">
+            Describe a goal or bring an existing curriculum. Your sources, notes and progress stay
+            connected.
+          </p>
+          <button className="btn" onClick={() => onNavigate('create')}>
+            Create your first journey
+          </button>
+        </Empty>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2">
+          {data.paths.map((path) => (
+            <button
+              key={path.id}
+              onClick={() => onNavigate('graph', { path_id: path.id })}
+              className="rounded-xl border border-[#E3E0D8] bg-white p-5 text-left transition-all hover:border-[#B8B5AD] hover:shadow-sm"
+            >
+              <h3 className="font-display text-xl">{path.title}</h3>
+              <p className="my-2 line-clamp-2 text-sm text-[#7A7870]">{path.description}</p>
+              <div className="my-4 h-1.5 rounded-full bg-[#EEF0EB]">
                 <div
-                  key={i}
-                  onClick={() => onNavigate('node')}
-                  className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-white hover:border hover:border-[#E3E0D8] cursor-pointer transition-all group"
-                >
-                  <div className={`w-2 h-2 rounded-full flex-shrink-0 ${
-                    n.status === 'current' ? 'bg-[#4A5FA5]' : 'bg-[#5B7A58]'
-                  }`}></div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-[#1A1916] truncate">{n.title}</p>
-                    <p className="text-xs text-[#A8A5A0]">{n.journey}</p>
-                  </div>
-                  <span className="text-xs text-[#C0BDB5] group-hover:text-[#7A7870] transition-colors flex-shrink-0">{n.time}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Saved knowledge */}
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-medium text-[#1A1916]">Saved Knowledge</h3>
-              <button onClick={() => onNavigate('notebook')} className="text-xs text-[#A8A5A0] hover:text-[#5B7A58] transition-colors">
-                View all
-              </button>
-            </div>
-            <div className="space-y-2">
-              {savedNotes.map((n, i) => (
-                <div key={i} className="p-3 bg-white border border-[#E3E0D8] rounded-lg hover:border-[#B8B5AD] cursor-pointer transition-all">
-                  <p className="text-sm text-[#1A1916] font-medium mb-0.5">{n.title}</p>
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs text-[#A8A5A0]">{n.source}</p>
-                    <p className="text-xs text-[#C0BDB5]">{n.date}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Quick stats */}
-          <div className="bg-[#F0EEE9] border border-[#E3E0D8] rounded-lg p-4">
-            <p className="text-xs text-[#A8A5A0] uppercase tracking-widest mb-3">This week</p>
-            <div className="grid grid-cols-2 gap-3">
-              {[
-                { label: 'Nodes studied', value: '12' },
-                { label: 'Threads explored', value: '5' },
-                { label: 'Notes saved', value: '18' },
-                { label: 'Sources cited', value: '34' },
-              ].map((s, i) => (
-                <div key={i}>
-                  <p className="font-display text-xl font-light text-[#1A1916]">{s.value}</p>
-                  <p className="text-xs text-[#7A7870]">{s.label}</p>
-                </div>
-              ))}
-            </div>
-          </div>
+                  className="h-full rounded-full bg-[#5B7A58]"
+                  style={{ width: `${path.progress}%` }}
+                />
+              </div>
+              <div className="flex justify-between text-xs text-[#A8A5A0]">
+                <span>
+                  {path.completed_count}/{path.node_count} nodes · {Math.round(path.progress)}%
+                </span>
+                <span>{date(path.updated_at)}</span>
+              </div>
+            </button>
+          ))}
         </div>
-      </div>
+      )}
     </div>
   )
 }

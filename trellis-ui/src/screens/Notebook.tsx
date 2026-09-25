@@ -1,301 +1,556 @@
 import { useState } from 'react'
+import Link from 'next/link'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowDown, ArrowUp, Download, FileText, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import {
+  api,
+  date,
+  type Navigate,
+  type NotebookItem,
+  type NotebookPage,
+  type Workspace,
+} from '../lib/api'
+import { Empty, ErrorNotice, Loading, Markdown, Modal } from '../components/ui'
+import SaveToNotebook from '../components/SaveToNotebook'
 
-function ExportModal({ onClose }: { onClose: () => void }) {
-  const [exported, setExported] = useState(false)
-  const [options, setOptions] = useState({
-    selectedNotes: true,
-    sources: true,
-    sessionSummary: true,
-    threads: true,
-    fullNode: false,
+export default function Notebook({
+  pathId,
+  onNavigate,
+}: {
+  pathId?: string
+  onNavigate: Navigate
+}) {
+  const client = useQueryClient()
+  const [pageId, setPageId] = useState('all')
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  const [newNote, setNewNote] = useState(false)
+  const [noteSaved, setNoteSaved] = useState(false)
+  const [pageEditor, setPageEditor] = useState<NotebookPage | 'new' | null>(null)
+  const [pageTitle, setPageTitle] = useState('')
+  const [editing, setEditing] = useState(false)
+  const [title, setTitle] = useState('')
+  const [content, setContent] = useState('')
+  const workspace = useQuery({
+    queryKey: ['workspace'],
+    queryFn: () => api<Workspace>('/workspace'),
   })
-
-  const toggleOption = (key: keyof typeof options) => setOptions(o => ({ ...o, [key]: !o[key] }))
-
+  const journey = workspace.data?.paths.find((path) => path.id === pathId)
+  const pages = useQuery({
+    queryKey: ['notebook', pathId],
+    queryFn: () => api<NotebookPage[]>(`/notebook/pages?path_id=${encodeURIComponent(pathId!)}`),
+    enabled: !!pathId,
+  })
+  const action = useMutation({
+    mutationFn: ({ path, method, body }: { path: string; method: string; body?: unknown }) =>
+      api(path, method, body),
+    onSuccess: (data, variables) => {
+      client.invalidateQueries({ queryKey: ['notebook'] })
+      client.invalidateQueries({ queryKey: ['study-sets'] })
+      client.invalidateQueries({ queryKey: ['workspace'] })
+      client.invalidateQueries({ queryKey: ['learning-sessions'] })
+      client.invalidateQueries({ queryKey: ['history'] })
+      if (variables.path === '/notebook/pages' && variables.method === 'POST') {
+        setPageId((data as NotebookPage).id)
+        setSelectedId(null)
+      }
+      if (variables.method === 'DELETE' && variables.path === `/notebook/pages/${pageId}`)
+        setPageId('all')
+      setEditing(false)
+      setPageEditor(null)
+    },
+  })
+  const all = pages.data?.flatMap((page) => page.items) || []
+  const items = all.filter(
+    (item) =>
+      (pageId === 'all' || item.page_id === pageId) &&
+      `${item.title} ${item.content}`.toLowerCase().includes(search.toLowerCase()),
+  )
+  const selected = items.find((item) => item.id === selectedId) || items[0]
+  const selectedPage = pages.data?.find((page) => page.id === selected?.page_id)
+  function reorder(item: NotebookItem, delta: number) {
+    const page = pages.data!.find((candidate) => candidate.id === item.page_id)!
+    const ids = page.items.map((candidate) => candidate.id)
+    const index = ids.indexOf(item.id)
+    ;[ids[index], ids[index + delta]] = [ids[index + delta], ids[index]]
+    action.mutate({
+      path: `/notebook/pages/${page.id}/reorder`,
+      method: 'POST',
+      body: { item_ids: ids },
+    })
+  }
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/20 backdrop-blur-sm">
-      <div className="bg-white border border-[#E3E0D8] rounded-xl shadow-2xl w-[440px] p-6 screen-enter">
-        {exported ? (
-          <div className="text-center py-4">
-            <div className="w-10 h-10 rounded-full bg-[#EFF4EE] border border-[#C5D9C4] flex items-center justify-center mx-auto mb-3">
-              <span className="text-[#5B7A58]">✓</span>
-            </div>
-            <h2 className="font-display text-xl font-medium text-[#1A1916] mb-1">PDF prepared</h2>
-            <p className="text-sm text-[#7A7870] mb-5">Machine Learning Notes · 12 pages</p>
-            <button onClick={onClose} className="bg-[#2D2C28] text-white text-sm px-6 py-2.5 rounded-lg hover:bg-[#1A1916] transition-colors">
-              Done
+    <div className="screen-enter">
+      <div className="mb-7 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="font-display text-3xl font-light">
+            {journey ? `${journey.title} notebook` : 'Your notebooks'}
+          </h1>
+          <p className="mt-1 text-sm text-[#7A7870]">
+            Group related notes into sections, in your own order.
+          </p>
+        </div>
+        <div className="flex gap-2">
+          {journey && (
+            <Link
+              className="btn-secondary"
+              href={`/?screen=session&path=${encodeURIComponent(journey.id)}`}
+            >
+              <Download size={14} /> Study & export
+            </Link>
+          )}
+          <button
+            className="btn"
+            disabled={!journey}
+            onClick={() => {
+              setNoteSaved(false)
+              action.reset()
+              setNewNote(true)
+            }}
+          >
+            <Plus size={14} /> New note
+          </button>
+        </div>
+      </div>
+      <div className="mb-6 max-w-md">
+        <label className="field-label" htmlFor="notebook-journey">
+          Learning journey
+        </label>
+        <select
+          id="notebook-journey"
+          className="field"
+          value={journey?.id || ''}
+          disabled={workspace.isPending}
+          onChange={(event) => onNavigate('notebook', { path_id: event.target.value })}
+        >
+          <option value="" disabled>
+            Choose a learning journey
+          </option>
+          {workspace.data?.paths.map((path) => (
+            <option key={path.id} value={path.id}>
+              {path.title}
+            </option>
+          ))}
+        </select>
+        <p className="mt-2 text-xs text-[#7A7870]">
+          Each journey has its own notebook. Your study resume position stays the same.
+        </p>
+      </div>
+      <ErrorNotice error={workspace.error || pages.error || action.error} />
+      {noteSaved && (
+        <p role="status" className="mb-4 rounded-lg bg-[#EFF4EE] p-3 text-sm text-[#5B7A58]">
+          Note saved to Notebook
+        </p>
+      )}
+      {workspace.isPending ? (
+        <Loading />
+      ) : !journey ? (
+        <Empty title="Choose a learning journey">
+          <p>Open a journey’s notebook to create sections and keep your notes together.</p>
+        </Empty>
+      ) : pages.isPending ? (
+        <Loading />
+      ) : (
+        <div className="flex flex-col gap-5 lg:flex-row">
+          <aside className="w-full flex-shrink-0 lg:w-44">
+            <button
+              className={`mb-1 w-full rounded-lg px-3 py-2 text-left text-sm ${
+                pageId === 'all' ? 'bg-[#2D2C28] text-white' : 'text-[#7A7870]'
+              }`}
+              onClick={() => {
+                action.reset()
+                setPageId('all')
+                setEditing(false)
+              }}
+            >
+              All notes <span className="float-right text-xs opacity-60">{all.length}</span>
             </button>
-          </div>
-        ) : (
-          <>
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="font-display text-xl font-medium text-[#1A1916]">Export Study Material</h2>
-              <button onClick={onClose} className="text-[#A8A5A0] hover:text-[#1A1916] text-xl transition-colors">×</button>
+            {pages.data?.map((page) => (
+              <div key={page.id} className="group flex items-center">
+                <button
+                  className={`min-w-0 flex-1 rounded-lg px-3 py-2 text-left text-sm ${
+                    pageId === page.id ? 'bg-white text-[#1A1916]' : 'text-[#7A7870]'
+                  }`}
+                  onClick={() => {
+                    action.reset()
+                    setPageId(page.id)
+                    setEditing(false)
+                  }}
+                >
+                  <span className="block truncate">{page.title}</span>
+                </button>
+                <button
+                  className="icon-button"
+                  aria-label={`Edit section ${page.title}`}
+                  onClick={() => {
+                    action.reset()
+                    setPageTitle(page.title)
+                    setPageEditor(page)
+                  }}
+                >
+                  <Pencil size={12} />
+                </button>
+              </div>
+            ))}
+            <button
+              className="mt-4 flex items-center gap-1 px-3 text-xs text-[#5B7A58]"
+              onClick={() => {
+                action.reset()
+                setPageTitle('')
+                setPageEditor('new')
+              }}
+            >
+              <Plus size={13} /> New section
+            </button>
+          </aside>
+          <section className="w-full flex-shrink-0 lg:w-64 xl:w-72">
+            <div className="relative mb-4">
+              <Search className="absolute left-3 top-3 text-[#A8A5A0]" size={14} />
+              <input
+                aria-label="Search notebook"
+                className="field !pl-9 !text-xs"
+                placeholder="Search notes…"
+                value={search}
+                onChange={(event) => {
+                  action.reset()
+                  setSearch(event.target.value)
+                  setEditing(false)
+                }}
+              />
             </div>
-            <p className="text-xs font-medium text-[#7A7870] uppercase tracking-wide mb-3">Include</p>
-            <div className="space-y-2 mb-5">
-              {(Object.entries({
-                selectedNotes: 'Selected notes',
-                sources: 'Sources',
-                sessionSummary: 'Study session summary',
-                threads: 'Exploratory threads',
-                fullNode: 'Full learning node',
-              }) as [keyof typeof options, string][]).map(([key, label]) => (
-                <label key={key} className="flex items-center gap-2.5 cursor-pointer">
-                  <div
-                    onClick={() => toggleOption(key)}
-                    className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 transition-all ${options[key] ? 'bg-[#5B7A58] border-[#5B7A58]' : 'border-[#C0BDB5]'}`}
-                  >
-                    {options[key] && <span className="text-white text-[9px]">✓</span>}
+            {items.length === 0 && (
+              <Empty title="A place for your ideas">
+                <p>Save an explanation from a learning node, or write your own note.</p>
+              </Empty>
+            )}
+            <div className="space-y-2">
+              {items.map((item) => (
+                <button
+                  key={item.id}
+                  className={`w-full rounded-lg border p-4 text-left ${
+                    selected?.id === item.id
+                      ? 'border-[#C5D9C4] bg-[#EFF4EE]'
+                      : 'border-[#E3E0D8] bg-white'
+                  }`}
+                  onClick={() => {
+                    setSelectedId(item.id)
+                    setEditing(false)
+                  }}
+                >
+                  <p className="text-sm font-medium">{item.title}</p>
+                  <div className="mt-2 text-[#7A7870]">
+                    <Markdown compact>{item.content}</Markdown>
                   </div>
-                  <span className="text-sm text-[#3D3C38]">{label}</span>
-                </label>
+                  <p className="mt-2 text-[10px] text-[#A8A5A0]">
+                    {pages.data?.find((page) => page.id === item.page_id)?.title}
+                  </p>
+                </button>
               ))}
             </div>
-            <div className="bg-[#F7F6F2] border border-[#E3E0D8] rounded-lg p-3 mb-5">
-              <p className="text-xs text-[#A8A5A0] mb-2">Preview</p>
-              <p className="text-sm font-medium text-[#1A1916]">Machine Learning</p>
-              <p className="text-xs text-[#7A7870]">Logistic Regression · est. 12 pages</p>
-            </div>
-            <div className="flex gap-2">
-              <button onClick={onClose} className="flex-1 border border-[#E3E0D8] text-[#3D3C38] text-sm py-2.5 rounded-lg hover:bg-[#F0EEE9] transition-all">
-                Cancel
-              </button>
-              <button onClick={() => setExported(true)} className="flex-1 bg-[#2D2C28] text-white text-sm py-2.5 rounded-lg hover:bg-[#1A1916] transition-colors">
-                Export PDF
-              </button>
-            </div>
-          </>
-        )}
-      </div>
-    </div>
-  )
-}
-
-const categories = ['All Notes', 'Machine Learning', 'Saved Explanations', 'Examples', 'Study Sessions']
-
-interface NotebookEntry {
-  id: string
-  title: string
-  source: string
-  category: string
-  date: string
-  tags: string[]
-  content: string
-  type: 'explanation' | 'note' | 'example' | 'session'
-}
-
-const entries: NotebookEntry[] = [
-  {
-    id: '1',
-    title: 'Sigmoid function intuition',
-    source: 'Logistic Regression',
-    category: 'Machine Learning',
-    date: 'Today, 11:32',
-    tags: ['sigmoid', 'probability', 'classification'],
-    type: 'explanation',
-    content: 'The sigmoid maps any real number to (0,1). For logistic regression, this is ideal because we want P(y=1|x) to be a valid probability. As z → ∞, σ(z) → 1; as z → −∞, σ(z) → 0. The function is differentiable everywhere, which makes gradient descent viable.',
-  },
-  {
-    id: '2',
-    title: 'Why linear algebra matters for ML',
-    source: 'Linear Algebra',
-    category: 'Machine Learning',
-    date: 'Yesterday, 14:10',
-    tags: ['linear algebra', 'vectors', 'matrices'],
-    type: 'note',
-    content: 'Most machine learning operations are fundamentally linear algebra: dot products measure similarity, matrix multiplication transforms feature spaces, eigenvectors reveal directions of maximum variance (PCA). Understanding the math lets you reason about why algorithms work rather than treating them as black boxes.',
-  },
-  {
-    id: '3',
-    title: 'CAP Theorem — saved explanation',
-    source: 'System Design',
-    category: 'Saved Explanations',
-    date: '2 days ago',
-    tags: ['cap theorem', 'distributed systems', 'consistency'],
-    type: 'explanation',
-    content: 'A distributed system can guarantee at most two of: Consistency (all nodes return the same data), Availability (every request gets a response), and Partition tolerance (system operates despite network failures). In practice, networks do fail, so real systems choose CA or CP — you cannot escape the trade-off.',
-  },
-  {
-    id: '4',
-    title: 'Study Session — Sept 19',
-    source: 'Machine Learning',
-    category: 'Study Sessions',
-    date: '3 days ago',
-    tags: ['session', 'logistic regression', 'sigmoid'],
-    type: 'session',
-    content: '55 minutes · 3 nodes covered · 12 questions explored · 4 sources cited · 2 notes saved',
-  },
-]
-
-export default function Notebook() {
-  const [activeCategory, setActiveCategory] = useState('All Notes')
-  const [selectedEntry, setSelectedEntry] = useState<NotebookEntry>(entries[0])
-  const [search, setSearch] = useState('')
-  const [showExport, setShowExport] = useState(false)
-
-  const filtered = entries.filter(e => {
-    const matchCat = activeCategory === 'All Notes' || e.category === activeCategory || e.type === activeCategory.toLowerCase()
-    const matchSearch = !search || e.title.toLowerCase().includes(search.toLowerCase()) || e.content.toLowerCase().includes(search.toLowerCase())
-    return matchCat && matchSearch
-  })
-
-  const typeIcon: Record<string, string> = {
-    explanation: '⬡',
-    note: '◈',
-    example: '◇',
-    session: '◉',
-  }
-
-  return (
-    <div className="screen-enter flex h-[calc(100vh-4rem)] gap-0">
-      {showExport && <ExportModal onClose={() => setShowExport(false)} />}
-      {/* Sidebar */}
-      <div className="w-52 flex-shrink-0 border-r border-[#E3E0D8] pr-5">
-        <div className="mb-5">
-          <h2 className="font-display text-xl font-medium text-[#1A1916] mb-4">Notebook</h2>
-          <div className="relative">
-            <input
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              placeholder="Search…"
-              className="w-full text-xs bg-[#F0EEE9] border border-[#E3E0D8] rounded-lg pl-3 pr-3 py-2 outline-none focus:bg-white focus:border-[#9B9890] transition-all placeholder:text-[#C0BDB5]"
-            />
-          </div>
-        </div>
-        <div className="space-y-0.5">
-          {categories.map(cat => (
-            <button
-              key={cat}
-              onClick={() => setActiveCategory(cat)}
-              className={`w-full text-left text-xs px-2.5 py-2 rounded-md transition-all ${
-                activeCategory === cat
-                  ? 'bg-[#2D2C28] text-white'
-                  : 'text-[#7A7870] hover:bg-[#F0EEE9] hover:text-[#1A1916]'
-              }`}
-            >
-              {cat}
-            </button>
-          ))}
-        </div>
-        <div className="mt-6 pt-4 border-t border-[#E3E0D8]">
-          <p className="text-xs text-[#A8A5A0] mb-2">Quick stats</p>
-          <div className="space-y-1">
-            {[
-              { label: 'Total notes', value: '27' },
-              { label: 'Journeys', value: '4' },
-              { label: 'Sessions', value: '12' },
-            ].map((s, i) => (
-              <div key={i} className="flex justify-between text-xs">
-                <span className="text-[#A8A5A0]">{s.label}</span>
-                <span className="font-mono text-[#1A1916]">{s.value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* Entry list */}
-      <div className="w-64 flex-shrink-0 border-r border-[#E3E0D8] px-4 overflow-y-auto">
-        <div className="flex items-center justify-between py-3 mb-1 sticky top-0 bg-[#F7F6F2]">
-          <span className="text-xs text-[#A8A5A0]">{filtered.length} entries</span>
-          <button onClick={() => setShowExport(true)} className="text-xs text-[#A8A5A0] hover:text-[#7A7870] transition-colors">Export PDF</button>
-        </div>
-        <div className="space-y-1.5">
-          {filtered.map(entry => (
-            <div
-              key={entry.id}
-              onClick={() => setSelectedEntry(entry)}
-              className={`p-3 rounded-lg cursor-pointer transition-all ${
-                selectedEntry.id === entry.id
-                  ? 'bg-white border border-[#C0BDB5] shadow-sm'
-                  : 'hover:bg-white hover:border hover:border-[#E3E0D8]'
-              }`}
-            >
-              <div className="flex items-start gap-2 mb-1.5">
-                <span className="text-[#A8A5A0] text-sm mt-0.5 flex-shrink-0">{typeIcon[entry.type]}</span>
-                <p className="text-sm font-medium text-[#1A1916] leading-snug">{entry.title}</p>
-              </div>
-              <p className="text-xs text-[#A8A5A0] ml-5">{entry.source}</p>
-              <p className="text-xs text-[#C0BDB5] ml-5 mt-0.5">{entry.date}</p>
-              <div className="flex flex-wrap gap-1 mt-2 ml-5">
-                {entry.tags.slice(0, 2).map(t => (
-                  <span key={t} className="text-xs bg-[#F0EEE9] text-[#7A7870] px-1.5 py-0.5 rounded">#{t}</span>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      {/* Entry content */}
-      <div className="flex-1 pl-8 pt-4 overflow-y-auto">
-        <div className="max-w-2xl">
-          <div className="flex items-start justify-between mb-5">
-            <div>
-              <div className="flex items-center gap-2 text-xs text-[#A8A5A0] mb-2">
-                <span>{selectedEntry.source}</span>
-                <span>·</span>
-                <span>{selectedEntry.date}</span>
-              </div>
-              <h2 className="font-display text-2xl font-light text-[#1A1916]">{selectedEntry.title}</h2>
-            </div>
-            <div className="flex gap-2 flex-shrink-0 ml-4">
-              <button className="text-xs border border-[#E3E0D8] text-[#7A7870] px-3 py-1.5 rounded-md hover:bg-white transition-all">Edit</button>
-              <button onClick={() => setShowExport(true)} className="text-xs border border-[#E3E0D8] text-[#7A7870] px-3 py-1.5 rounded-md hover:bg-white transition-all">Export PDF</button>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-1.5 mb-6">
-            {selectedEntry.tags.map(t => (
-              <span key={t} className="text-xs bg-[#F0EEE9] text-[#7A7870] border border-[#E3E0D8] px-2 py-0.5 rounded-full">#{t}</span>
-            ))}
-          </div>
-
-          {selectedEntry.type === 'session' ? (
-            <div className="bg-white border border-[#E3E0D8] rounded-xl p-6">
-              <p className="text-xs text-[#A8A5A0] uppercase tracking-widest mb-4">Session Summary</p>
-              <p className="text-sm text-[#3D3C38] leading-relaxed mb-5">{selectedEntry.content}</p>
-              <div className="grid grid-cols-2 gap-4">
-                {[
-                  { label: 'Duration', value: '55 min' },
-                  { label: 'Nodes covered', value: '3' },
-                  { label: 'Questions explored', value: '12' },
-                  { label: 'Sources cited', value: '4' },
-                ].map((s, i) => (
-                  <div key={i} className="bg-[#F7F6F2] rounded-lg p-3">
-                    <p className="font-display text-xl font-light text-[#1A1916]">{s.value}</p>
-                    <p className="text-xs text-[#7A7870]">{s.label}</p>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ) : (
-            <div className="prose-trellis">
-              <p>{selectedEntry.content}</p>
-              <div className="bg-white border border-[#E3E0D8] rounded-lg p-4 mt-6">
-                <p className="text-xs text-[#A8A5A0] uppercase tracking-widest mb-3">Source Reference</p>
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded bg-[#EFF4EE] flex items-center justify-center text-[#5B7A58] text-sm">⬡</div>
-                  <div>
-                    <p className="text-sm font-medium text-[#1A1916]">From: {selectedEntry.source}</p>
-                    <p className="text-xs text-[#A8A5A0]">Machine Learning Journey · {selectedEntry.date}</p>
-                  </div>
+          </section>
+          {selected && (
+            <article className="min-w-0 flex-1 rounded-xl border border-[#E3E0D8] bg-white p-5 lg:p-7">
+              <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-xs text-[#A8A5A0]">{date(selected.created_at)}</p>
+                <div className="flex gap-1">
+                  <button
+                    aria-label="Move note up"
+                    className="icon-button"
+                    disabled={action.isPending || selectedPage?.items[0]?.id === selected.id}
+                    onClick={() => reorder(selected, -1)}
+                  >
+                    <ArrowUp size={14} />
+                  </button>
+                  <button
+                    aria-label="Move note down"
+                    className="icon-button"
+                    disabled={action.isPending || selectedPage?.items.at(-1)?.id === selected.id}
+                    onClick={() => reorder(selected, 1)}
+                  >
+                    <ArrowDown size={14} />
+                  </button>
+                  <button
+                    aria-label="Edit selected note"
+                    className="icon-button"
+                    onClick={() => {
+                      action.reset()
+                      setTitle(selected.title)
+                      setContent(selected.content)
+                      setEditing(true)
+                    }}
+                  >
+                    <Pencil size={14} />
+                  </button>
+                  <button
+                    aria-label="Delete selected note"
+                    className="icon-button"
+                    disabled={action.isPending}
+                    onClick={() => {
+                      if (confirm('Delete this note? Existing PDF exports will remain unchanged.'))
+                        action.mutate({
+                          path: `/notebook/items/${selected.id}`,
+                          method: 'DELETE',
+                        })
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
                 </div>
               </div>
-            </div>
+              {editing ? (
+                <form
+                  onSubmit={(event) => {
+                    event.preventDefault()
+                    if (!title.trim() || !content.trim()) return
+                    action.mutate({
+                      path: `/notebook/items/${selected.id}`,
+                      method: 'PATCH',
+                      body: { title: title.trim(), content: content.trim() },
+                    })
+                  }}
+                >
+                  <label htmlFor="edit-note-title" className="field-label">
+                    Title
+                  </label>
+                  <input
+                    id="edit-note-title"
+                    disabled={action.isPending}
+                    maxLength={200}
+                    className="field"
+                    required
+                    value={title}
+                    onChange={(event) => setTitle(event.target.value)}
+                  />
+                  <label htmlFor="edit-note-content" className="field-label">
+                    Content · Markdown supported
+                  </label>
+                  <textarea
+                    id="edit-note-content"
+                    disabled={action.isPending}
+                    className="field min-h-64 font-mono !text-xs"
+                    required
+                    value={content}
+                    onChange={(event) => setContent(event.target.value)}
+                  />
+                  <div className="mt-4 flex gap-2">
+                    <button
+                      className="btn"
+                      disabled={action.isPending || !title.trim() || !content.trim()}
+                    >
+                      Save note
+                    </button>
+                    <button
+                      className="btn-secondary"
+                      type="button"
+                      onClick={() => {
+                        setEditing(false)
+                        action.reset()
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <h2 className="mb-5 font-display text-2xl">{selected.title}</h2>
+                  <Markdown>{selected.content}</Markdown>
+                </>
+              )}
+              <div className="mt-8 border-t border-[#E3E0D8] pt-5">
+                <label htmlFor="move-page" className="field-label">
+                  Notebook section
+                </label>
+                <select
+                  id="move-page"
+                  className="field"
+                  value={selected.page_id}
+                  disabled={action.isPending}
+                  onChange={(event) =>
+                    action.mutate({
+                      path: `/notebook/items/${selected.id}`,
+                      method: 'PATCH',
+                      body: { page_id: event.target.value },
+                    })
+                  }
+                >
+                  {pages.data?.map((page) => (
+                    <option key={page.id} value={page.id}>
+                      {page.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {selected.origin && Object.keys(selected.origin).length > 0 && (
+                <details className="mt-5">
+                  <summary className="cursor-pointer text-xs text-[#7A7870]">
+                    Original learning context
+                  </summary>
+                  <dl className="mt-3 space-y-2 text-xs">
+                    {Object.entries(selected.origin)
+                      .filter(([key]) =>
+                        [
+                          'path_title',
+                          'node_title',
+                          'thread_title',
+                          'prompt',
+                          'provider',
+                          'model',
+                          'created_at',
+                        ].includes(key),
+                      )
+                      .map(([key, value]) => (
+                        <div key={key}>
+                          <dt className="text-[#A8A5A0]">{key.replaceAll('_', ' ')}</dt>
+                          <dd className="mt-1 whitespace-pre-wrap">
+                            {typeof value === 'object'
+                              ? JSON.stringify(value)
+                              : String(value || '')}
+                          </dd>
+                        </div>
+                      ))}
+                  </dl>
+                </details>
+              )}
+              {!!selected.evidence?.length && (
+                <div className="mt-5">
+                  <p className="mb-3 text-xs font-medium text-[#7A7870]">Saved sources</p>
+                  {selected.evidence.map((evidence, index) => (
+                    <div
+                      className="mb-3 rounded-lg bg-[#F7F6F2] p-3 text-xs"
+                      key={`${evidence.id}:${index}`}
+                    >
+                      <p className="font-medium">
+                        [{index + 1}] {evidence.title}
+                      </p>
+                      <p className="my-2 text-[#7A7870]">{evidence.excerpt}</p>
+                      {evidence.url && (
+                        <a
+                          className="text-[#4A5FA5]"
+                          target="_blank"
+                          rel="noreferrer"
+                          href={evidence.url}
+                        >
+                          Open source ↗
+                        </a>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </article>
           )}
-
-          <div className="mt-8 pt-5 border-t border-[#E3E0D8]">
-            <p className="text-xs text-[#A8A5A0] mb-3">Your notes</p>
-            <textarea
-              placeholder="Add your own reflection…"
-              rows={3}
-              className="w-full bg-white border border-[#E3E0D8] rounded-lg px-4 py-3 text-sm text-[#1A1916] placeholder:text-[#C0BDB5] outline-none focus:border-[#9B9890] transition-all resize-none leading-relaxed"
-            />
-          </div>
         </div>
-      </div>
+      )}
+      {newNote && journey && (
+        <SaveToNotebook
+          pathId={journey.id}
+          journeyTitle={journey.title}
+          payload={{ title: '', content: '' }}
+          initialPageId={pageId === 'all' ? undefined : pageId}
+          onClose={() => setNewNote(false)}
+          onSaved={() => {
+            setNewNote(false)
+            setNoteSaved(true)
+          }}
+        />
+      )}
+      {pageEditor && (
+        <Modal
+          title={pageEditor === 'new' ? 'New notebook section' : 'Edit notebook section'}
+          onClose={() => {
+            setPageEditor(null)
+            action.reset()
+          }}
+        >
+          <form
+            onSubmit={(event) => {
+              event.preventDefault()
+              action.mutate({
+                path: pageEditor === 'new' ? '/notebook/pages' : `/notebook/pages/${pageEditor.id}`,
+                method: pageEditor === 'new' ? 'POST' : 'PATCH',
+                body: {
+                  title: pageTitle.trim(),
+                  ...(pageEditor === 'new' ? { path_id: pathId } : {}),
+                },
+              })
+            }}
+          >
+            <label htmlFor="page-title" className="field-label">
+              Section title
+            </label>
+            <input
+              id="page-title"
+              disabled={action.isPending}
+              maxLength={200}
+              className="field"
+              required
+              value={pageTitle}
+              onChange={(event) => setPageTitle(event.target.value)}
+            />
+            <ErrorNotice error={action.error} />
+            {pageEditor !== 'new' && (
+              <div className="mt-4 flex gap-2">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={action.isPending || pageEditor.position === 0}
+                  onClick={() =>
+                    action.mutate({
+                      path: `/notebook/pages/${pageEditor.id}`,
+                      method: 'PATCH',
+                      body: { position: pageEditor.position - 1 },
+                    })
+                  }
+                >
+                  <ArrowUp size={14} /> Move section earlier
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  disabled={
+                    action.isPending || pageEditor.position === (pages.data?.length || 1) - 1
+                  }
+                  onClick={() =>
+                    action.mutate({
+                      path: `/notebook/pages/${pageEditor.id}`,
+                      method: 'PATCH',
+                      body: { position: pageEditor.position + 1 },
+                    })
+                  }
+                >
+                  <ArrowDown size={14} /> Move section later
+                </button>
+              </div>
+            )}
+            <div className="mt-5 flex justify-between gap-2">
+              {pageEditor !== 'new' && (
+                <button
+                  type="button"
+                  className="btn-danger"
+                  disabled={action.isPending || pageEditor.items.length > 0}
+                  onClick={() =>
+                    action.mutate({
+                      path: `/notebook/pages/${pageEditor.id}`,
+                      method: 'DELETE',
+                    })
+                  }
+                >
+                  Delete empty section
+                </button>
+              )}
+              <button className="btn ml-auto" disabled={action.isPending || !pageTitle.trim()}>
+                Save section
+              </button>
+            </div>
+            {pageEditor !== 'new' && pageEditor.items.length > 0 && (
+              <p className="mt-3 text-xs text-[#7A7870]">
+                Move or delete this section’s notes before removing the section.
+              </p>
+            )}
+          </form>
+        </Modal>
+      )}
     </div>
   )
 }
