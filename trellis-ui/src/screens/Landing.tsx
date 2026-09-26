@@ -1,4 +1,6 @@
 import { useState, useEffect } from 'react'
+import { Menu, X } from 'lucide-react'
+import Benchmarks from '../components/Benchmarks'
 
 interface LandingProps {
   onEnter: () => void
@@ -227,6 +229,13 @@ function HeroGraph() {
 
 export default function Landing({ onEnter }: LandingProps) {
   const [visible, setVisible] = useState(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+  const links = [
+    { href: '#how-it-works', label: 'How it works' },
+    { href: '#features', label: 'Features' },
+    { href: '#philosophy', label: 'Philosophy' },
+    { href: '#benchmarks', label: 'Benchmarks' },
+  ]
 
   useEffect(() => {
     const t = setTimeout(() => setVisible(true), 80)
@@ -240,49 +249,81 @@ export default function Landing({ onEnter }: LandingProps) {
       }`}
     >
       {/* Nav */}
-      <nav className="fixed top-0 left-0 right-0 z-50 flex items-center justify-between px-8 py-4 border-b border-[#E3E0D8] bg-[#F7F6F2]/95 backdrop-blur-sm">
-        <div className="flex items-center gap-2">
-          <TrellisLogo />
-          <span className="font-display text-lg font-medium tracking-tight text-[#1A1916]">
-            Trellis
-          </span>
+      <nav
+        aria-label="Homepage navigation"
+        className="fixed inset-x-0 top-0 z-50 border-b border-[#E3E0D8] bg-[#F7F6F2]/95 backdrop-blur-sm"
+      >
+        <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4 sm:px-8">
+          <div className="flex shrink-0 items-center gap-2">
+            <TrellisLogo />
+            <span className="font-display text-lg font-medium tracking-tight text-[#1A1916]">
+              Trellis
+            </span>
+          </div>
+          <div className="hidden items-center gap-6 text-sm text-[#7A7870] lg:flex">
+            {links.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                className="whitespace-nowrap transition-colors hover:text-[#1A1916]"
+              >
+                {link.label}
+              </a>
+            ))}
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onEnter}
+              className="hidden whitespace-nowrap px-3 py-1.5 text-sm text-[#7A7870] transition-colors hover:text-[#1A1916] sm:block"
+            >
+              Open workspace
+            </button>
+            <button
+              onClick={onEnter}
+              className="whitespace-nowrap rounded-md bg-[#2D2C28] px-4 py-2 text-sm text-[#F7F6F2] transition-colors hover:bg-[#1A1916]"
+            >
+              Start learning
+            </button>
+            <button
+              type="button"
+              aria-label={menuOpen ? 'Close navigation' : 'Open navigation'}
+              aria-expanded={menuOpen}
+              aria-controls="homepage-mobile-navigation"
+              className="rounded-md p-2 text-[#5A5850] hover:bg-[#EAE8E3] lg:hidden"
+              onClick={() => setMenuOpen(!menuOpen)}
+            >
+              {menuOpen ? <X size={20} /> : <Menu size={20} />}
+            </button>
+          </div>
         </div>
-        <div className="hidden md:flex items-center gap-8 text-sm text-[#7A7870]">
-          <a href="#how-it-works" className="hover:text-[#1A1916] transition-colors">
-            How it works
-          </a>
-          <a href="#features" className="hover:text-[#1A1916] transition-colors">
-            Features
-          </a>
-          <a href="#philosophy" className="hover:text-[#1A1916] transition-colors">
-            Philosophy
-          </a>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={onEnter}
-            className="text-sm text-[#7A7870] hover:text-[#1A1916] transition-colors px-3 py-1.5"
+        {menuOpen && (
+          <div
+            id="homepage-mobile-navigation"
+            className="grid gap-1 border-t border-[#E3E0D8] px-6 py-3 lg:hidden"
           >
-            Open workspace
-          </button>
-          <button
-            onClick={onEnter}
-            className="text-sm bg-[#2D2C28] text-[#F7F6F2] px-4 py-2 rounded-md hover:bg-[#1A1916] transition-colors"
-          >
-            Start learning
-          </button>
-        </div>
+            {links.map((link) => (
+              <a
+                key={link.href}
+                href={link.href}
+                onClick={() => setMenuOpen(false)}
+                className="rounded-md px-3 py-2 text-sm text-[#5A5850] hover:bg-[#EAE8E3]"
+              >
+                {link.label}
+              </a>
+            ))}
+          </div>
+        )}
       </nav>
 
       {/* Hero */}
-      <section className="pt-28 pb-16 px-8 max-w-6xl mx-auto">
+      <section className="pt-28 pb-16 px-6 sm:px-8 max-w-6xl mx-auto">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-16 items-center min-h-[70vh]">
           <div>
             <div className="inline-flex items-center gap-2 text-xs text-[#5B7A58] bg-[#EFF4EE] border border-[#C5D9C4] px-3 py-1.5 rounded-full mb-8">
               <span className="w-1.5 h-1.5 rounded-full bg-[#5B7A58] inline-block"></span>
               AI-Powered Learning Engine
             </div>
-            <h1 className="font-display text-5xl lg:text-6xl font-light leading-[1.08] text-[#1A1916] mb-6 tracking-tight">
+            <h1 className="font-display text-4xl sm:text-5xl lg:text-6xl font-light leading-[1.08] text-[#1A1916] mb-6 tracking-tight">
               Learn as a connected
               <br />
               <em className="italic text-[#5B7A58]">journey,</em> not a<br />
@@ -359,7 +400,10 @@ export default function Landing({ onEnter }: LandingProps) {
       </section>
 
       {/* Features */}
-      <section id="features" className="py-20 px-8 max-w-6xl mx-auto border-t border-[#E3E0D8]">
+      <section
+        id="features"
+        className="scroll-mt-28 py-20 px-6 sm:px-8 max-w-6xl mx-auto border-t border-[#E3E0D8]"
+      >
         <p className="text-xs text-[#7A7870] uppercase tracking-widest mb-10 text-center">
           What makes Trellis different
         </p>
@@ -393,7 +437,7 @@ export default function Landing({ onEnter }: LandingProps) {
       </section>
 
       {/* Philosophy quote */}
-      <section id="philosophy" className="py-20 px-8 bg-[#2D2C28]">
+      <section id="philosophy" className="scroll-mt-28 py-20 px-6 sm:px-8 bg-[#2D2C28]">
         <div className="max-w-3xl mx-auto text-center">
           <p className="font-display text-2xl lg:text-3xl text-[#F7F6F2] font-light leading-relaxed italic mb-6">
             "Trellis doesn't just answer what you ask.
@@ -409,11 +453,18 @@ export default function Landing({ onEnter }: LandingProps) {
       </section>
 
       {/* How it works */}
-      <section id="how-it-works" className="py-20 px-8 max-w-6xl mx-auto">
-        <p className="text-xs text-[#7A7870] uppercase tracking-widest mb-12 text-center">
+      <section
+        id="how-it-works"
+        aria-labelledby="learning-model-heading"
+        className="scroll-mt-28 py-20 px-6 sm:px-8 max-w-6xl mx-auto"
+      >
+        <h2
+          id="learning-model-heading"
+          className="text-xs text-[#7A7870] uppercase tracking-widest mb-12 text-center"
+        >
           The learning model
-        </p>
-        <div className="flex flex-col md:flex-row items-start gap-0">
+        </h2>
+        <ol className="grid grid-cols-1 md:grid-cols-5">
           {[
             {
               step: '01',
@@ -441,23 +492,31 @@ export default function Landing({ onEnter }: LandingProps) {
               desc: 'Your state, progress, and notebook persist across every session.',
             },
           ].map((s, i, arr) => (
-            <div key={i} className="flex md:flex-col items-center flex-1 relative">
-              <div className="flex items-center flex-1 md:flex-col md:items-center">
-                <div className="w-10 h-10 rounded-full border-2 border-[#5B7A58] flex items-center justify-center text-xs font-mono text-[#5B7A58] bg-white flex-shrink-0">
+            <li
+              key={s.step}
+              className="relative grid min-w-0 grid-cols-[2.5rem_1fr] gap-x-4 pb-8 last:pb-0 md:block md:px-3 md:pb-0 md:text-center"
+            >
+              {i < arr.length - 1 && (
+                <span
+                  aria-hidden="true"
+                  className="absolute bottom-0 left-5 top-10 w-px bg-[#DDD9D1] md:bottom-auto md:left-1/2 md:top-5 md:h-px md:w-full"
+                />
+              )}
+              <div className="relative z-10 flex md:justify-center">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border-2 border-[#5B7A58] bg-white font-mono text-xs text-[#5B7A58]">
                   {s.step}
-                </div>
-                {i < arr.length - 1 && (
-                  <div className="flex-1 md:w-px md:flex-none md:h-8 h-px w-full bg-[#DDD9D1] md:my-2 mx-2 md:mx-0"></div>
-                )}
+                </span>
               </div>
-              <div className="ml-4 md:ml-0 md:text-center md:px-4 mt-0 md:mt-3 pb-6 md:pb-0">
-                <p className="font-medium text-sm text-[#1A1916]">{s.label}</p>
+              <div className="min-w-0 pt-1 md:mt-6 md:pt-0">
+                <h3 className="font-medium text-sm text-[#1A1916]">{s.label}</h3>
                 <p className="text-xs text-[#7A7870] mt-0.5 leading-relaxed">{s.desc}</p>
               </div>
-            </div>
+            </li>
           ))}
-        </div>
+        </ol>
       </section>
+
+      <Benchmarks />
 
       {/* CTA */}
       <section className="py-20 px-8 border-t border-[#E3E0D8]">

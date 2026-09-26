@@ -1,0 +1,284 @@
+{
+  "schema_version": 1,
+  "title": "Trellis evidence benchmark",
+  "run": {
+    "id": "20260926T035034Z-b4ec6c",
+    "finished_at": "2026-09-26T04:01:40.033394+00:00",
+    "executions": 192,
+    "provider": "azure",
+    "model": "gpt-5.6-luna",
+    "judge_provider": "azure",
+    "judge_model": "gpt-5.6-luna",
+    "embedding_profile": "azure:text-embedding-3-large:3072",
+    "workers": 4,
+    "repetitions": 1
+  },
+  "dataset": {
+    "id": "trellis-evidence-benchmark",
+    "version": "1.0.0",
+    "total_cases": 96,
+    "dev_cases": 48,
+    "test_cases": 48,
+    "category_counts": {
+      "comparison": 16,
+      "conflict": 16,
+      "followup": 16,
+      "missing_evidence": 16,
+      "normal": 16,
+      "source_constraint": 16
+    },
+    "dataset_sha256": "ed15f17de1586c594d5d4fab52cec3df4ae01007a1a77bc27c1a61e3d3fc6f41",
+    "source_sha256": "912a592b2dc1389c4c2b45068b09e09b187ef9a15fd352c4060f0e989191e6c3"
+  },
+  "methodology": {
+    "framework": "DeepEval 4.2.6",
+    "baseline": "Same model, scoped history and pgvector ranking; raw-question retrieval and one cited draft; no rewrite, review, corrective generation, gap-driven search or general-knowledge fallback.",
+    "source_policy": "fixed curated/synthetic passages; frozen web candidates; no live search or fetching",
+    "latency_scope": "answer service including query embeddings and all internal model calls; excludes case setup, corpus embedding and external benchmark judging",
+    "token_scope": "provider-reported chat input/output plus embedding tokens; judge usage reported separately; unknown usage never estimated",
+    "review_status": "pending_human_review",
+    "human_reviewed": false,
+    "same_model_judge": true
+  },
+  "paired_correctness": {
+    "baseline_score": 0.635897435897436,
+    "trellis_score": 0.905128205128205,
+    "difference_points": 26.923076923076906,
+    "paired_rows": 39,
+    "unscored_pairs": 9
+  },
+  "paired_citations": {
+    "baseline_score": 0.9508196721311475,
+    "trellis_score": 0.9830508474576272,
+    "difference_points": 3.2231175326479677,
+    "paired_rows": 27,
+    "unscored_pairs": 21,
+    "baseline_citations": {
+      "score": 0.9508196721311475,
+      "supported_citations": 58,
+      "total_citations": 61,
+      "scored_rows": 27,
+      "excluded_rows": 0,
+      "excluded_citations": 0,
+      "error_rows": 0,
+      "zero_citation_rows": 0,
+      "missing_count_rows": 0,
+      "total_rows": 27
+    },
+    "trellis_citations": {
+      "score": 0.9830508474576272,
+      "supported_citations": 58,
+      "total_citations": 59,
+      "scored_rows": 27,
+      "excluded_rows": 0,
+      "excluded_citations": 0,
+      "error_rows": 0,
+      "zero_citation_rows": 0,
+      "missing_count_rows": 0,
+      "total_rows": 27
+    },
+    "excluded_citations": {
+      "baseline": {
+        "known_citations": 0,
+        "unknown_count_rows": 0
+      },
+      "trellis": {
+        "known_citations": 12,
+        "unknown_count_rows": 0
+      }
+    }
+  },
+  "test": {
+    "baseline": {
+      "total_rows": 48,
+      "coverage": {
+        "answered": {
+          "count": 27,
+          "denominator": 48,
+          "rate": 0.5625
+        },
+        "unverified": {
+          "count": 0,
+          "denominator": 48,
+          "rate": 0.0
+        },
+        "abstained": {
+          "count": 21,
+          "denominator": 48,
+          "rate": 0.4375
+        },
+        "error": {
+          "count": 0,
+          "denominator": 48,
+          "rate": 0.0
+        }
+      },
+      "request_error_rows": 0,
+      "metrics": {
+        "answer_correctness": {
+          "score": 0.635897435897436,
+          "scored_rows": 39,
+          "unscored_rows": 9,
+          "error_rows": 1,
+          "total_rows": 48
+        },
+        "citation_precision": {
+          "score": 0.9508196721311475,
+          "supported_citations": 58,
+          "total_citations": 61,
+          "scored_rows": 27,
+          "excluded_rows": 0,
+          "excluded_citations": 0,
+          "error_rows": 0,
+          "zero_citation_rows": 21,
+          "missing_count_rows": 0,
+          "total_rows": 48
+        },
+        "retrieval_recall_at_8": {
+          "score": 0.8611111111111112,
+          "scored_rows": 36,
+          "unscored_rows": 12,
+          "error_rows": 0,
+          "total_rows": 48
+        },
+        "thread_context": {
+          "score": null,
+          "scored_rows": 0,
+          "unscored_rows": 48,
+          "error_rows": 0,
+          "total_rows": 48
+        },
+        "expected_status": {
+          "score": 0.7291666666666666,
+          "scored_rows": 48,
+          "unscored_rows": 0,
+          "error_rows": 0,
+          "total_rows": 48
+        }
+      },
+      "latency_seconds": {
+        "median": 3.9831055830291007,
+        "p95": 5.34136298749363,
+        "measured_rows": 48,
+        "missing_rows": 0
+      },
+      "product_usage": {
+        "total_tokens": {
+          "total": 75799,
+          "known_partial_total": 75799,
+          "known_rows": 48,
+          "unknown_rows": 0
+        },
+        "model_calls": {
+          "total": 44,
+          "known_partial_total": 44,
+          "known_rows": 48,
+          "unknown_rows": 0
+        }
+      }
+    },
+    "trellis": {
+      "total_rows": 48,
+      "coverage": {
+        "answered": {
+          "count": 34,
+          "denominator": 48,
+          "rate": 0.7083333333333334
+        },
+        "unverified": {
+          "count": 4,
+          "denominator": 48,
+          "rate": 0.08333333333333333
+        },
+        "abstained": {
+          "count": 10,
+          "denominator": 48,
+          "rate": 0.20833333333333334
+        },
+        "error": {
+          "count": 0,
+          "denominator": 48,
+          "rate": 0.0
+        }
+      },
+      "request_error_rows": 0,
+      "metrics": {
+        "answer_correctness": {
+          "score": 0.9075,
+          "scored_rows": 40,
+          "unscored_rows": 8,
+          "error_rows": 0,
+          "total_rows": 48
+        },
+        "citation_precision": {
+          "score": 0.9859154929577465,
+          "supported_citations": 70,
+          "total_citations": 71,
+          "scored_rows": 34,
+          "excluded_rows": 0,
+          "excluded_citations": 0,
+          "error_rows": 0,
+          "zero_citation_rows": 14,
+          "missing_count_rows": 0,
+          "total_rows": 48
+        },
+        "retrieval_recall_at_8": {
+          "score": 0.8888888888888888,
+          "scored_rows": 36,
+          "unscored_rows": 12,
+          "error_rows": 0,
+          "total_rows": 48
+        },
+        "thread_context": {
+          "score": 0.925,
+          "scored_rows": 8,
+          "unscored_rows": 40,
+          "error_rows": 0,
+          "total_rows": 48
+        },
+        "expected_status": {
+          "score": 0.9583333333333334,
+          "scored_rows": 48,
+          "unscored_rows": 0,
+          "error_rows": 0,
+          "total_rows": 48
+        }
+      },
+      "latency_seconds": {
+        "median": 9.92800031247316,
+        "p95": 16.13165225844714,
+        "measured_rows": 48,
+        "missing_rows": 0
+      },
+      "product_usage": {
+        "total_tokens": {
+          "total": 233680,
+          "known_partial_total": 233680,
+          "known_rows": 48,
+          "unknown_rows": 0
+        },
+        "model_calls": {
+          "total": 153,
+          "known_partial_total": 153,
+          "known_rows": 48,
+          "unknown_rows": 0
+        }
+      }
+    }
+  },
+  "limitations": [
+    "Reference facts and relevance labels are AI-authored; review status: pending_human_review. Results remain provisional until human review.",
+    "Model judges provide evaluation signals, not verified factual accuracy. Judge failures are reported as missing scores, not successes or zero scores.",
+    "The same model generates and judges answers; correlated errors and self-preference may bias scores.",
+    "Citation precision measures support for app-rendered citation footer links, not coverage of every answer claim or numeric markers inside prose. Rows without citation links have no citation denominator.",
+    "Retrieval uses frozen web fixtures. These timings do not measure live web search or page-fetch speed.",
+    "Observed differences describe this dataset and run configuration only; they are not general performance claims or statistical significance findings."
+  ],
+  "metric_notes": {
+    "answer_correctness": "A graded 0–1 LLM-judge score, not a factual-accuracy percentage. Expected abstentions have no correctness grade; unavailable judgments are excluded and counted as errors. Paired correctness uses only cases scored for both variants.",
+    "citation_precision": "Supported footer citation links divided by judged links. Each variant's full-test score uses its own cited answers; paired citation scores use only mutually eligible cases. This does not measure support for every claim.",
+    "retrieval_recall_at_8": "Mean fraction of known relevant passages found in the initial top-eight retrieval. Cases without relevant-passage labels are excluded. Later evidence supplementation is not included.",
+    "thread_context": "LLM-judged agreement between the resolved follow-up and its expected intent. The baseline has no separate resolver and receives no score for this metric.",
+    "coverage": "Answered means sourced; unverified means labelled general knowledge; abstained means withheld. Expected-status agreement measures the response type, not the correctness of its content."
+  }
+}
