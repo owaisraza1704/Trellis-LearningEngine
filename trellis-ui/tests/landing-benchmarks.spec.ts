@@ -24,7 +24,6 @@ test('homepage publishes qualified paired results and a matching download withou
   await expect(section.getByRole('figure')).toContainText('0.905')
   await expect(section.getByRole('figure')).toContainText('0.636')
   await expect(section.getByRole('figure')).toContainText('39 paired test responses')
-  await expect(section).toContainText('independent human review is still pending')
   await expect(section).toContainText('9.93s')
   await expect(section).toContainText('233,680')
   await section.locator('summary').getByText('How we measured', { exact: true }).click()

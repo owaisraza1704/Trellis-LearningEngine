@@ -8,18 +8,18 @@ The run completed **192 answer executions**: 96 cases × one-pass RAG and Trelli
 
 Each variant ran all 48 test cases. Correctness is a graded score from 0 to 1; it is not a percentage of factually correct answers.
 
-| Measure | One-pass RAG | Trellis |
-| --- | ---: | ---: |
-| Mean answer-correctness judge score | 0.636 (39 cases) | 0.907 (40 cases) |
-| Model-judged citation precision | 95.1% (58/61 footer links) | 98.6% (70/71 footer links) |
-| Initial retrieval recall@8 | 86.1% (36 cases) | 88.9% (36 cases) |
-| Thread-resolution judge score | N/A: no separate resolver | 0.925 (8 cases) |
-| Expected-status matches | 35/48 | 46/48 |
-| Sourced / unverified / withheld answers | 27 / 0 / 21 | 34 / 4 / 10 |
-| Median / p95 answer latency | 3.98s / 5.34s | 9.93s / 16.13s |
-| Product tokens, including query embeddings | 75,799 | 233,680 |
-| Product chat calls | 44 | 153 |
-| Answer request errors | 0 | 0 |
+| Measure                                    |               One-pass RAG |                    Trellis |
+| ------------------------------------------ | -------------------------: | -------------------------: |
+| Mean answer-correctness judge score        |           0.636 (39 cases) |           0.907 (40 cases) |
+| Model-judged citation precision            | 95.1% (58/61 footer links) | 98.6% (70/71 footer links) |
+| Initial retrieval recall@8                 |           86.1% (36 cases) |           88.9% (36 cases) |
+| Thread-resolution judge score              |  N/A: no separate resolver |            0.925 (8 cases) |
+| Expected-status matches                    |                      35/48 |                      46/48 |
+| Sourced / unverified / withheld answers    |                27 / 0 / 21 |                34 / 4 / 10 |
+| Median / p95 answer latency                |              3.98s / 5.34s |             9.93s / 16.13s |
+| Product tokens, including query embeddings |                     75,799 |                    233,680 |
+| Product chat calls                         |                         44 |                        153 |
+| Answer request errors                      |                          0 |                          0 |
 
 Eight expected-abstention cases per variant have no correctness grade. One additional baseline correctness judgment was unavailable (`test_networking_normal_01`). On the **39 mutually scored pairs**, correctness scores were 0.636 for the baseline and 0.905 for Trellis: a 26.9-point difference in judge scores, with no statistical-significance claim.
 

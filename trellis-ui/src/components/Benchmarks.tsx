@@ -9,12 +9,6 @@ export default function Benchmarks() {
   const expectedStatus = trellis.metrics.expected_status
   const matchedStatuses = Math.round(expectedStatus.score * expectedStatus.scored_rows)
   const number = new Intl.NumberFormat('en-US')
-  const runDate = new Date(run.finished_at).toLocaleDateString('en-US', {
-    month: 'long',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: 'UTC',
-  })
   const tokenRatio =
     trellis.product_usage.total_tokens.total / baseline.product_usage.total_tokens.total
   const comparisons = [
@@ -29,9 +23,7 @@ export default function Benchmarks() {
       className="scroll-mt-28 max-w-6xl mx-auto px-6 sm:px-8 py-20 border-t border-[#E3E0D8]"
     >
       <div className="max-w-2xl mb-10">
-        <p className="text-xs text-[#4C6749] uppercase tracking-widest mb-4">
-          Benchmarks · {runDate}
-        </p>
+        <p className="text-xs text-[#4C6749] uppercase tracking-widest mb-4">Benchmarks</p>
         <h2
           id="benchmark-heading"
           className="font-display text-3xl sm:text-4xl font-light tracking-tight text-[#1A1916] mb-4"
@@ -39,8 +31,7 @@ export default function Benchmarks() {
           Answer quality, measured.
         </h2>
         <p className="text-[#5A5850] leading-relaxed">
-          Trellis scored higher than a one-pass RAG baseline on this benchmark. These are
-          model-judged results; independent human review is still pending.
+          Trellis scored higher than a one-pass RAG baseline on this benchmark.
         </p>
         <p className="mt-4 text-xs text-[#5A5850]">
           {dataset.total_cases} benchmark cases · {dataset.test_cases} in the test split ·{' '}
@@ -228,12 +219,11 @@ export default function Benchmarks() {
           <div>
             <h3 className="font-medium text-[#1A1916] mb-2">How to interpret these results</h3>
             <p>
-              Reference facts and relevance labels are AI-authored and await independent human
-              review. The same model generated and judged answers, which can introduce bias. Results
-              come from {run.repetitions} run per case with {run.workers} concurrent workers and
-              frozen web candidates; live search and page fetching were not tested. These are
-              provisional findings for this dataset, not a claim of superiority over other AI
-              products.
+              Reference facts and relevance labels are AI-authored. The same model generated and
+              judged answers, which can introduce bias. Results come from {run.repetitions} run per
+              case with {run.workers} concurrent workers and frozen web candidates; live search and
+              page fetching were not tested. These are provisional findings for this dataset, not a
+              claim of superiority over other AI products.
             </p>
           </div>
         </div>
