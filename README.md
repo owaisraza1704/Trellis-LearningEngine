@@ -49,12 +49,12 @@ The UI calls the backend through a same-origin API. PostgreSQL stores learning s
 
 ## Tech Stack
 
-| Layer | Technologies |
-| --- | --- |
-| Frontend | Next.js, React, TypeScript, TanStack Query, React Flow |
-| Backend | Python, FastAPI, SQLModel, Alembic |
-| AI and retrieval | OpenAI SDK, provider-selected models, pgvector, DDGS, HTTPX |
-| Storage and infrastructure | PostgreSQL, local file storage, Docker Compose |
+| Layer                      | Technologies                                                |
+| -------------------------- | ----------------------------------------------------------- |
+| Frontend                   | Next.js, React, TypeScript, TanStack Query, React Flow      |
+| Backend                    | Python, FastAPI, SQLModel, Alembic                          |
+| AI and retrieval           | OpenAI SDK, provider-selected models, pgvector, DDGS, HTTPX |
+| Storage and infrastructure | PostgreSQL, local file storage, Docker Compose              |
 
 ## Evaluation
 
@@ -64,16 +64,12 @@ This is a **model-judged score, not a measured factual-accuracy rate**. Referenc
 
 ## Performance / Results
 
-| Test-split measure | One-pass RAG | Trellis |
-| --- | ---: | ---: |
-| Mean correctness judge score, 39 paired cases | 0.636 | 0.905 |
-| Model-judged citation precision | 95.1% | 98.6% |
-| Initial retrieval recall@8, 36 cases | 86.1% | 88.9% |
-| Median answer latency | 3.98 s | 9.93 s |
-| Product tokens used | 75,799 | 233,680 |
+| Test-split measure                            | One-pass RAG | Trellis |
+| --------------------------------------------- | -----------: | ------: |
+| Mean correctness judge score, 39 paired cases |        0.636 |   0.905 |
+| Model-judged citation precision               |        95.1% |   98.6% |
+| Initial retrieval recall@8, 36 cases          |        86.1% |   88.9% |
+| Median answer latency                         |       3.98 s |  9.93 s |
+| Product tokens used                           |       75,799 | 233,680 |
 
 Higher answer scores came with more model calls, latency, and token use. Monetary cost was not measured.
-
-## Run Locally
-
-Copy `.env.example` to `.env`, configure a chat provider and embedding model, then run `make setup` and `make up`. Open [localhost:3100](http://localhost:3100). Run `make test` for backend tests, lint, and frontend type checking.
