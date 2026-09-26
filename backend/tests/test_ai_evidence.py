@@ -266,8 +266,8 @@ def test_goal_curriculum_requires_valid_citations_for_every_node(monkeypatch, su
     with pytest.raises(HTTPException) as error:
         ai.generate_curriculum(None, "Learn function definitions", "goal", [])
     assert error.value.status_code == 502
-    assert "valid source references" in error.value.detail
-    assert calls == [ai.GoalPlan, ai.Curriculum]
+    assert "verifiable sources" in error.value.detail
+    assert calls == [ai.GoalPlan, ai.Curriculum, ai.Curriculum]
 
 
 def test_goal_curriculum_returns_exact_provenance_after_support_check(monkeypatch, supported_answer):
@@ -318,12 +318,12 @@ def test_goal_curriculum_rejects_unsupported_topics_despite_valid_ids(monkeypatc
             title="Quantum functions", description="Invented topic", children=[],
             search_query="Python function definitions",
         )]),
-        curriculum, rejected, curriculum, rejected,
+        curriculum, rejected, curriculum, rejected, rejected,
     ])
     monkeypatch.setattr(ai, "structured_completion", lambda *args: next(results))
     with pytest.raises(HTTPException) as error:
         ai.generate_curriculum(None, "Learn function definitions", "goal", [])
-    assert "not sufficiently supported" in error.value.detail
+    assert "outline did not cover your goal reliably" in error.value.detail
 
 
 @pytest.mark.parametrize("supported,completeness", [(False, 1), (True, 0.8)])
@@ -643,6 +643,45 @@ def test_fetch_pins_dns_and_blocks_private_redirect(monkeypatch):
     assert seen[0].url.host == "93.184.215.14"
     assert seen[0].headers["Host"] == "example.com"
     assert seen[0].extensions["sni_hostname"] == "example.com"
+
+
+def test_github_repository_indexes_full_readme(monkeypatch):
+    repository_url = "https://github.com/ashishps1/awesome-system-design-resources"
+    readme = """# Awesome System Design Resources
+
+## Networking Fundamentals
+- DNS resolves domain names to addresses.
+- TCP establishes connections between hosts.
+
+## API Fundamentals
+- APIs define how clients and services communicate.
+
+## Asynchronous Communication
+- Message queues decouple producers and consumers.
+"""
+    fetched = []
+
+    def fetch(url, *, accept=None):
+        fetched.append((url, accept))
+        return readme.encode(), "application/vnd.github.raw+json", url
+
+    monkeypatch.setattr(evidence, "fetch_document", fetch)
+    monkeypatch.setattr(evidence, "embed_texts", lambda texts: (
+        [[1, 0, 0] for _ in texts], "test:3",
+    ))
+    source = Source(title="System design", kind="url", url=repository_url)
+
+    chunks = evidence.prepare_source_chunks(source)
+
+    assert fetched == [(
+        "https://api.github.com/repos/ashishps1/awesome-system-design-resources/readme",
+        "application/vnd.github.raw+json",
+    )]
+    assert source.url == repository_url
+    assert source.status == "ready"
+    assert "## Networking Fundamentals" in source.content
+    assert "## Asynchronous Communication" in source.content
+    assert chunks[0].location.startswith("GitHub README")
 
 
 def test_pdf_parser_preserves_page_locations(tmp_path, monkeypatch):

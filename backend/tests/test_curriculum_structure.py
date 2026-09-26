@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import pytest
 
-from trellis.curriculum import outline_paths, preserves_outline
+from trellis.curriculum import outline_paths, preserves_outline, source_roadmap_paths
 
 
 GPU_GOAL = """## Phase 1: Hardware & Compute Architecture
@@ -165,3 +165,31 @@ def test_same_topic_label_is_allowed_under_distinct_phases():
 
 def test_unstructured_goal_has_no_explicit_paths_to_enforce():
     assert preserves_outline([{"title": "GPU foundations"}], [])
+
+
+def test_source_roadmap_reads_markdown_headings_without_body_bullets():
+    article = """# System Design
+## Networking
+- A supporting bullet, not a chapter
+### DNS
+## Storage
+"""
+    assert source_roadmap_paths(article) == [
+        ("System Design",), ("System Design", "Networking"),
+        ("System Design", "Networking", "DNS"), ("System Design", "Storage"),
+    ]
+
+
+def test_source_roadmap_reads_numbered_sections_from_older_plain_text_articles():
+    article = """An introduction to the concepts.
+1. Client-Server Architecture
+The client talks to a server.
+- This is an explanatory bullet.
+2. IP Address
+More explanatory prose.
+3. DNS
+More prose.
+"""
+    assert source_roadmap_paths(article) == [
+        ("Client-Server Architecture",), ("IP Address",), ("DNS",),
+    ]

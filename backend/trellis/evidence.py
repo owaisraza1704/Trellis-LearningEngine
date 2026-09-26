@@ -2,6 +2,7 @@
 
 import io
 import ipaddress
+import re
 import socket
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -46,18 +47,21 @@ def public_url(url: str) -> tuple[httpx.URL, str]:
         raise HTTPException(422, "Use a public HTTP(S) source URL on port 80 or 443.") from None
 
 
-def fetch_document(url: str) -> tuple[bytes, str, str]:
+def fetch_document(url: str, *, accept: str | None = None) -> tuple[bytes, str, str]:
     """Validate each redirect and pin DNS so a source cannot reach local services."""
     with httpx.Client(timeout=25, follow_redirects=False, trust_env=False) as client:
         for _ in range(5):
             original, address = public_url(url)
             pinned = original.copy_with(host=address)
+            headers = {
+                "Host": original.netloc.decode(),
+                "User-Agent": "TrellisLocal/0.1 (learning evidence reader)",
+            }
+            if accept:
+                headers["Accept"] = accept
             request = client.build_request(
                 "GET", pinned,
-                headers={
-                    "Host": original.netloc.decode(),
-                    "User-Agent": "TrellisLocal/0.1 (learning evidence reader)",
-                },
+                headers=headers,
                 extensions={"sni_hostname": original.host},
             )
             response = client.send(request, stream=True)
@@ -83,6 +87,17 @@ def fetch_document(url: str) -> tuple[bytes, str, str]:
 def document_sections(source: Source) -> list[tuple[str, str]]:
     content_type = ""
     if source.url:
+        parsed = urlsplit(source.url)
+        segments = parsed.path.strip("/").split("/")
+        if (
+            parsed.hostname in {"github.com", "www.github.com"}
+            and len(segments) == 2
+            and all(re.fullmatch(r"[A-Za-z0-9_.-]+", segment) for segment in segments)
+        ):
+            owner, repo = segments
+            readme_url = f"https://api.github.com/repos/{owner}/{repo}/readme"
+            data, _, _ = fetch_document(readme_url, accept="application/vnd.github.raw+json")
+            return [(data.decode("utf-8-sig", errors="replace"), "GitHub README")]
         data, content_type, final_url = fetch_document(source.url)
         source.url = final_url
     elif source.file_path:
@@ -97,7 +112,7 @@ def document_sections(source: Source) -> list[tuple[str, str]]:
     text = data.decode("utf-8-sig", errors="replace")
     if source.url and ("html" in content_type or "<html" in text[:1000].lower()):
         extracted = trafilatura.extract(
-            text, include_tables=True, include_comments=False,
+            text, output_format="markdown", include_tables=True, include_comments=False,
             # Microsoft Learn includes an inactive authorization template beside public articles.
             prune_xpath="//*[@unauthorized-private-section and @hidden]",
         )

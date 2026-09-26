@@ -1,24 +1,26 @@
 """Preserve the explicit topic structure in a learner's Markdown outline."""
 
+import re
+
 from markdown_it import MarkdownIt
 
 
-def outline_paths(text: str) -> list[tuple[str, ...]]:
+def outline_paths(text: str, *, headings_only: bool = False) -> list[tuple[str, ...]]:
     headings: list[tuple[int, str]] = []
     list_items: list[str | None] = []
     paths = []
     tokens = MarkdownIt().parse(text)
 
     for index, token in enumerate(tokens):
-        if token.type == "list_item_open":
+        if token.type == "list_item_open" and not headings_only:
             list_items.append(None)
-        elif token.type == "list_item_close":
+        elif token.type == "list_item_close" and not headings_only:
             list_items.pop()
         elif token.type == "inline":
             previous = tokens[index - 1]
             is_heading = previous.type == "heading_open" and previous.level == 0
             is_list_title = (
-                bool(list_items) and list_items[-1] is None
+                not headings_only and bool(list_items) and list_items[-1] is None
                 and previous.type == "paragraph_open"
             )
             if not is_heading and not is_list_title:
@@ -49,6 +51,25 @@ def outline_paths(text: str) -> list[tuple[str, ...]]:
                 paths.append(path)
 
     return paths
+
+
+def source_roadmap_paths(text: str) -> list[tuple[str, ...]]:
+    """Read article section headings, including numbered headings from older plain-text imports."""
+    headings = outline_paths(text, headings_only=True)
+    if len(headings) >= 2:
+        return headings
+
+    numbered: list[tuple[str, ...]] = []
+    for line in text.splitlines():
+        match = re.fullmatch(r"\s*(\d{1,2})[.)]\s+(.{1,180}?)\s*", line)
+        if not match:
+            continue
+        number, title = int(match[1]), match[2].strip()
+        if number == 1:
+            numbered = [(title,)]
+        elif number == len(numbered) + 1:
+            numbered.append((title,))
+    return numbered if len(numbered) >= 2 else []
 
 
 def preserves_outline(nodes: list[dict], required: list[tuple[str, ...]]) -> bool:

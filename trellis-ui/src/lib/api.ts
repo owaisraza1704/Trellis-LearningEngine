@@ -60,6 +60,7 @@ export interface PathDetail extends PathSummary {
   nodes: LearningNode[]
   generation?: {
     mode: string
+    basis?: string
     provider: string
     model: string
     evidence: Evidence[]

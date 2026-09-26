@@ -1,18 +1,21 @@
+import logging
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, ConfigDict, Field as InputField, model_validator
-from sqlalchemy import func, update
+from sqlalchemy import delete, func, update
 from sqlmodel import Session, select
 
 from . import ai
+from .config import settings
 from .db import get_session
 from .models import (
-    Activity, Interaction, LearningPath, LearningSession, Node, NotebookItem, NotebookPage,
-    Source, Thread, Workspace, utcnow,
+    Activity, Chunk, ExportRecord, Interaction, LearningPath, LearningSession, Node, NotebookItem,
+    NotebookPage, Source, StudySet, Thread, Workspace, utcnow,
 )
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 WITHHELD_ANSWER = "The previous answer was withheld because its support could not be verified."
 
 
@@ -299,6 +302,49 @@ def edit_path(path_id: str, body: PathEdit, session: Session = Depends(get_sessi
     session.add(path)
     session.commit()
     return path_detail(session, path)
+
+
+@router.delete("/paths/{path_id}", status_code=204)
+def delete_path(path_id: str, session: Session = Depends(get_session)):
+    path = require(session, LearningPath, path_id)
+    location = session.get(Workspace, 1)
+    if location and location.path_id == path_id:
+        location.path_id = location.node_id = location.thread_id = None
+        session.add(location)
+
+    export_ids = session.exec(select(ExportRecord.id).where(ExportRecord.path_id == path_id)).all()
+    web_ids = session.exec(select(Source.id).where(
+        Source.path_id == path_id, Source.kind == "web",
+    )).all()
+    page_ids = select(NotebookPage.id).where(NotebookPage.path_id == path_id)
+
+    # Remove dependent records before the journey because these tables use restrictive foreign keys.
+    session.exec(delete(Activity).where(Activity.path_id == path_id))
+    session.exec(delete(ExportRecord).where(ExportRecord.path_id == path_id))
+    session.exec(delete(StudySet).where(StudySet.path_id == path_id))
+    session.exec(delete(NotebookItem).where(
+        (NotebookItem.path_id == path_id) | NotebookItem.page_id.in_(page_ids),
+    ))
+    session.exec(delete(NotebookPage).where(NotebookPage.path_id == path_id))
+    session.exec(delete(LearningSession).where(LearningSession.path_id == path_id))
+    session.exec(delete(Interaction).where(Interaction.path_id == path_id))
+    session.exec(delete(Thread).where(Thread.path_id == path_id))
+    session.exec(delete(Node).where(Node.path_id == path_id))
+
+    # Learner-added material returns to the source library; discovered pages belong to this journey.
+    session.exec(update(Source).where(
+        Source.path_id == path_id, Source.kind != "web",
+    ).values(path_id=None))
+    session.exec(delete(Chunk).where(Chunk.source_id.in_(web_ids)))
+    session.exec(delete(Source).where(Source.id.in_(web_ids)))
+    session.delete(path)
+    session.commit()
+
+    for export_id in export_ids:
+        try:
+            (settings.data_dir / "exports" / f"{export_id}.pdf").unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Could not remove PDF export %s after deleting journey %s", export_id, path_id)
 
 
 @router.post("/paths/{path_id}/nodes", status_code=201)

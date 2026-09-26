@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ArrowRight, BookOpen, ChevronLeft, ChevronRight, Plus, Search } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ArrowRight, BookOpen, ChevronLeft, ChevronRight, Plus, Search, Trash2 } from 'lucide-react'
 import { api, date, type Navigate, type PathSummary, type Workspace } from '../lib/api'
 import { Empty, ErrorNotice, Loading, Status } from '../components/ui'
 
@@ -22,9 +22,14 @@ export default function JourneyLibrary({
   const [sort, setSort] = useState('recent')
   const [page, setPage] = useState(1)
   const heading = useRef<HTMLHeadingElement>(null)
+  const client = useQueryClient()
   const { data, error, isPending, refetch } = useQuery({
     queryKey: ['workspace'],
     queryFn: () => api<Workspace>('/workspace'),
+  })
+  const deleteJourney = useMutation({
+    mutationFn: (id: string) => api<void>(`/paths/${id}`, 'DELETE'),
+    onSuccess: () => client.invalidateQueries(),
   })
   if (isPending) return <Loading />
   if (!data)
@@ -73,6 +78,7 @@ export default function JourneyLibrary({
           <Plus size={16} /> New Journey
         </button>
       </div>
+      <ErrorNotice error={deleteJourney.error} />
 
       {data.paths.length === 0 ? (
         <Empty
@@ -242,6 +248,24 @@ export default function JourneyLibrary({
                           onClick={() => onNavigate('node', path.resume!)}
                         >
                           Continue learning <ArrowRight size={14} className="inline" />
+                        </button>
+                      )}
+                      {!notebooks && (
+                        <button
+                          type="button"
+                          aria-label={`Delete journey ${path.title}`}
+                          className="inline-flex items-center gap-1 text-sm text-[#A8554E] hover:underline"
+                          disabled={deleteJourney.isPending}
+                          onClick={() => {
+                            if (
+                              confirm(
+                                `Delete "${path.title}" permanently? Its curriculum, progress, conversations, notebook, and PDF exports will be removed. Sources you added will return to your source library; web pages Trellis found for this journey will be removed.`,
+                              )
+                            )
+                              deleteJourney.mutate(path.id)
+                          }}
+                        >
+                          <Trash2 size={14} /> Delete journey
                         </button>
                       )}
                     </div>

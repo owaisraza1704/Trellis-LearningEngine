@@ -128,6 +128,25 @@ body {
   }
 }
 
+.journey-progress-indicator {
+  animation: journey-progress 1.8s ease-in-out infinite;
+}
+
+@keyframes journey-progress {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(200%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .journey-progress-indicator {
+    animation: none;
+  }
+}
+
 .study-panel-divider:hover,
 .study-panel-divider[data-separator='active'] {
   background: #dfe6dc;

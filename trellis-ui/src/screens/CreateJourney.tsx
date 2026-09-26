@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowRight, BookOpen, Eye, Plus, X } from 'lucide-react'
 import { api, type Navigate, type PathDetail, type Source } from '../lib/api'
@@ -15,6 +15,8 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
   const [adding, setAdding] = useState(false)
   const [librarySelection, setLibrarySelection] = useState<string[] | null>(null)
   const [preview, setPreview] = useState<string | null>(null)
+  const [elapsedSeconds, setElapsedSeconds] = useState(0)
+  const startedAt = useRef(0)
   const sources = useQuery({
     queryKey: ['sources'],
     queryFn: () => api<Source[]>('/sources'),
@@ -34,6 +36,13 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
       onNavigate('graph', { path_id: data.id })
     },
   })
+  useEffect(() => {
+    if (!create.isPending) return
+    const timer = window.setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startedAt.current) / 1000))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [create.isPending])
   const available = sources.data?.filter((source) => !source.path_id && source.kind !== 'web') || []
   const processing = chosen.some(
     (id) =>
@@ -56,7 +65,11 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
       <form
         onSubmit={(event) => {
           event.preventDefault()
-          if (!create.isPending && !processing) create.mutate()
+          if (!create.isPending && !processing) {
+            startedAt.current = Date.now()
+            setElapsedSeconds(0)
+            create.mutate()
+          }
         }}
       >
         <div className="mb-4 flex justify-center gap-2">
@@ -81,8 +94,8 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
         </div>
         <p id="journey-mode-description" className="mb-4 text-sm leading-relaxed text-[#7A7870]">
           {mode === 'goal'
-            ? 'Trellis plans a learning path from your goal and preserves any phases, topics and subtopics you explicitly request.'
-            : 'Trellis uses your supplied outline, keeping its phases, topics and subtopics in their hierarchy.'}
+            ? 'Trellis plans from your goal and preserves explicit topics. For a short topic with a matching roadmap source, it follows that roadmap.'
+            : 'Paste an outline to preserve its hierarchy, or enter a title and select one roadmap source to import its sections.'}
         </p>
         <label className="field-label" htmlFor="journey-input">
           {mode === 'goal' ? 'Your goal' : 'Curriculum or syllabus'}
@@ -96,7 +109,7 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
           placeholder={
             mode === 'goal'
               ? 'e.g. Understand databases well enough to design my first application'
-              : 'Paste your topics, modules and subtopics here…'
+              : 'Paste an outline, or enter a title and select one roadmap source…'
           }
           value={input}
           onChange={(event) => setInput(event.target.value)}
@@ -111,8 +124,9 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
             )}
           </div>
           <p className="mb-4 text-xs text-[#7A7870]">
-            Selected material takes priority. Trellis searches the web when more evidence is needed
-            and saves useful sources with this journey as your questions grow.
+            {mode === 'outline'
+              ? 'With a pasted outline, selected sources support later study. With only a title, select one roadmap source to import its sections.'
+              : 'Selected material takes priority. A matching roadmap source can supply a short topic path. Trellis searches the web when more evidence is needed as your questions grow.'}
           </p>
           <div className="mb-4 flex flex-wrap gap-2">
             <button
@@ -218,10 +232,28 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
           {!create.isPending && <ArrowRight size={15} />}
         </button>
         {create.isPending && (
-          <p role="status" className="mt-3 text-center text-xs text-[#7A7870]">
-            Building your curriculum and checking it against your request. Larger curricula can take
-            longer.
-          </p>
+          <div className="mt-4 rounded-xl border border-[#DDE7DD] bg-[#F4F7F2] p-4">
+            <div className="flex items-center justify-between gap-3">
+              <p role="status" className="text-sm font-medium text-[#3D5D40]">
+                Trellis is working on your learning path
+              </p>
+              <span className="shrink-0 font-mono text-xs text-[#5B7A58]">
+                {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}{' '}
+                elapsed
+              </span>
+            </div>
+            <div
+              role="progressbar"
+              aria-label="Building learning path"
+              className="mt-3 h-1.5 overflow-hidden rounded-full bg-[#DFE8DD]"
+            >
+              <div className="journey-progress-indicator h-full w-1/3 rounded-full bg-[#5B7A58]" />
+            </div>
+            <p className="mt-3 text-xs leading-relaxed text-[#5A6857]">
+              Planning topics, finding supporting material, and checking coverage. Larger curricula
+              can take a few minutes.
+            </p>
+          </div>
         )}
       </form>
       {adding && (

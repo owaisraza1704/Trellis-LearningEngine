@@ -276,6 +276,47 @@ def test_one_targeted_research_repair_preserves_the_plan_and_persists_only_accep
     assert len(evidence_ids) == len(set(evidence_ids)) == 14
 
 
+def test_unknown_citation_is_corrected_before_curriculum_review(goal_pipeline):
+    invalid = goal_pipeline.curriculum.model_copy(deep=True)
+    invalid.nodes[0].children[0].evidence_ids = ["invented-passage"]
+    goal_pipeline.revisions = [invalid, goal_pipeline.curriculum]
+
+    result = ai.generate_curriculum(None, GPU_GOAL, "goal", [])
+
+    calls = goal_pipeline.completions
+    assert [schema for schema, _ in calls] == [
+        ai.GoalPlan, ai.Curriculum, ai.Curriculum, ai.CurriculumEvaluation,
+    ]
+    feedback = calls[2][1]["evaluation_feedback"]
+    assert feedback["invalid_citations"] == [{
+        "title": invalid.nodes[0].children[0].title,
+        "evidence_ids": ["invented-passage"],
+    }]
+    assert "invented-passage" not in feedback["allowed_evidence_ids"]
+    assert calls[2][1]["previous_curriculum"] == invalid.model_dump()
+    assert result["generation"]["evaluation"]["correction_attempted"] is True
+    assert len(result["generation"]["evaluation"]["checks"]) == 1
+    assert all(set(node["evidence_ids"]) <= {
+        item["id"] for item in result["evidence"]
+    } for node in result["nodes"])
+
+
+def test_repeated_unknown_citation_rejects_path_without_saving(client, session, goal_pipeline):
+    invalid = goal_pipeline.curriculum.model_copy(deep=True)
+    invalid.nodes[0].children[0].evidence_ids = ["invented-passage"]
+    goal_pipeline.revisions = [invalid, invalid]
+
+    response = client.post("/api/paths", json={"input": GPU_GOAL, "mode": "goal"})
+
+    assert response.status_code == 502
+    assert "verifiable sources" in response.json()["detail"]
+    assert session.exec(select(LearningPath)).all() == []
+    assert session.exec(select(Node)).all() == []
+    assert [schema for schema, _ in goal_pipeline.completions] == [
+        ai.GoalPlan, ai.Curriculum, ai.Curriculum,
+    ]
+
+
 def test_failed_second_review_never_starts_another_research_round(client, session, goal_pipeline):
     first_query = "GPU integer quantization precision support"
     second_query = "Do not execute a third research round"
@@ -300,6 +341,69 @@ def test_failed_second_review_never_starts_another_research_round(client, sessio
         ai.GoalPlan, ai.Curriculum, ai.CurriculumEvaluation,
         ai.Curriculum, ai.CurriculumEvaluation,
     ]
+
+
+def test_broad_goal_with_unsupported_details_saves_labelled_outline(client, session, goal_pipeline):
+    rejected = goal_pipeline.evaluation.model_copy(update={
+        "supported": False, "grounding": 0.1,
+        "explanation": "The excerpts do not support the detailed node descriptions.",
+    })
+    goal_pipeline.reviews = [rejected, rejected, goal_pipeline.evaluation]
+
+    response = client.post("/api/paths", json={
+        "input": "Learn GPU engineering from hardware to serving.", "mode": "goal",
+    })
+
+    assert response.status_code == 201, response.text
+    result = response.json()
+    assert result["generation"]["evaluation"]["status"] == "plan_only"
+    assert result["generation"]["evaluation"]["source_review"]["supported"] is False
+    assert result["generation"]["evaluation"]["outline_review"]["supported"] is True
+    assert result["generation"]["evidence"]
+    assert len(result["nodes"]) == 16
+    assert all(node["description"] == f"Study {node['title']}." for node in result["nodes"])
+    assert all(node["evidence_ids"] == [] for node in result["nodes"])
+    assert len(session.exec(select(LearningPath)).all()) == 1
+
+
+def test_broad_goal_rejects_when_independent_outline_review_confirms_missing_content(
+    client, session, goal_pipeline,
+):
+    rejected = goal_pipeline.evaluation.model_copy(update={
+        "completeness": 0.7, "missing_topics": ["Model serving"],
+    })
+    goal_pipeline.reviews = [rejected, rejected, rejected]
+
+    response = client.post("/api/paths", json={
+        "input": "Learn GPU engineering from hardware to serving.", "mode": "goal",
+    })
+
+    assert response.status_code == 502
+    assert "outline did not cover your goal" in response.json()["detail"]
+    assert session.exec(select(LearningPath)).all() == []
+
+
+def test_broad_goal_uses_independent_outline_review_when_draft_coverage_fails(
+    client, session, goal_pipeline,
+):
+    rejected = goal_pipeline.evaluation.model_copy(update={
+        "completeness": 0.7, "missing_topics": ["Model serving"],
+    })
+    goal_pipeline.reviews = [rejected, rejected, goal_pipeline.evaluation]
+
+    response = client.post("/api/paths", json={
+        "input": "Learn GPU engineering from hardware to serving.", "mode": "goal",
+    })
+
+    assert response.status_code == 201, response.text
+    result = response.json()
+    review = result["generation"]["evaluation"]
+    assert review["status"] == "plan_only"
+    assert review["method"] == "goal_outline_after_draft_review"
+    assert review["source_review"]["missing_topics"] == ["Model serving"]
+    assert review["outline_review"]["missing_topics"] == []
+    assert all(node["evidence_ids"] == [] for node in result["nodes"])
+    assert len(session.exec(select(LearningPath)).all()) == 1
 
 
 def test_a_wrong_citation_can_be_revised_once_using_existing_evidence(goal_pipeline):

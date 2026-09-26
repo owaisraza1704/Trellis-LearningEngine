@@ -111,6 +111,51 @@ test('legacy journeys show their original request without inventing an input mod
   ).toBeVisible()
 })
 
+test('goal outlines show when detailed curriculum claims were not source verified', async ({
+  page,
+}) => {
+  const path = curriculum('goal')
+  path.generation!.evaluation = {
+    status: 'plan_only',
+    explanation: 'The detailed draft did not pass its source review.',
+  }
+  await mockCurriculum(page, path)
+
+  await page.goto('/?screen=graph&path=system-design')
+
+  await expect(page.getByRole('note', { name: 'Learning outline source status' })).toContainText(
+    'Trellis checks evidence when you study each one.',
+  )
+  await page.getByText('Original curriculum sources and assessment', { exact: true }).click()
+  await expect(page.getByText('plan only', { exact: true })).toBeVisible()
+})
+
+test('source roadmap imports identify their source-derived topics without invented scores', async ({
+  page,
+}) => {
+  const path = curriculum('outline')
+  path.generation!.basis = 'source_roadmap'
+  path.generation!.provider = 'local'
+  path.generation!.model = 'source structure'
+  path.generation!.evaluation = {
+    status: 'extracted',
+    explanation: 'Imported 30 ordered roadmap sections from the selected article.',
+  }
+  await mockCurriculum(page, path)
+
+  await page.goto('/?screen=graph&path=system-design')
+  await page.getByText('Original curriculum sources and assessment', { exact: true }).click()
+
+  await expect(page.getByText(/Imported source roadmap · local/)).toBeVisible()
+  await expect(
+    page.getByText('Imported 30 ordered roadmap sections from the selected article.'),
+  ).toBeVisible()
+  await expect(
+    page.getByText('The selected source is the recorded curriculum basis.'),
+  ).toBeVisible()
+  await expect(page.getByText('100%', { exact: true })).toHaveCount(0)
+})
+
 test('creation explains hierarchy support in both modes and preserves text when switching', async ({
   page,
 }) => {
@@ -126,14 +171,14 @@ test('creation explains hierarchy support in both modes and preserves text when 
   const outline = page.getByRole('button', { name: 'Existing curriculum', exact: true })
   await expect(goal).toHaveAttribute('aria-pressed', 'true')
   await expect(page.getByLabel('Your goal')).toHaveAccessibleDescription(
-    'Trellis plans a learning path from your goal and preserves any phases, topics and subtopics you explicitly request.',
+    'Trellis plans from your goal and preserves explicit topics. For a short topic with a matching roadmap source, it follows that roadmap.',
   )
   await page.getByLabel('Your goal').fill(originalRequest)
   await outline.click()
   await expect(outline).toHaveAttribute('aria-pressed', 'true')
   await expect(goal).toHaveAttribute('aria-pressed', 'false')
   await expect(page.getByLabel('Curriculum or syllabus')).toHaveAccessibleDescription(
-    'Trellis uses your supplied outline, keeping its phases, topics and subtopics in their hierarchy.',
+    'Paste an outline to preserve its hierarchy, or enter a title and select one roadmap source to import its sections.',
   )
   await expect(page.getByLabel('Curriculum or syllabus')).toHaveValue(originalRequest)
 })
@@ -176,9 +221,9 @@ test('failed curriculum coverage keeps the full request and selected sources for
   await page.getByRole('button', { name: 'Use selected sources', exact: true }).click()
   await page.getByRole('button', { name: 'Build My Learning Path', exact: true }).click()
   try {
-    await expect(page.getByRole('status')).toHaveText(
-      'Building your curriculum and checking it against your request. Larger curricula can take longer.',
-    )
+    await expect(page.getByRole('status')).toHaveText('Trellis is working on your learning path')
+    await expect(page.getByRole('progressbar', { name: 'Building learning path' })).toBeVisible()
+    await expect(page.getByText(/\d+:\d\d elapsed/)).not.toHaveText('0:00 elapsed')
     await expect(
       page.getByRole('button', { name: 'Building your learning path…', exact: true }),
     ).toBeDisabled()
@@ -187,6 +232,7 @@ test('failed curriculum coverage keeps the full request and selected sources for
   }
   const error = page.getByRole('main').getByRole('alert')
   await expect(error).toHaveText(detail)
+  await expect(page.getByRole('progressbar', { name: 'Building learning path' })).toHaveCount(0)
   await expect(error.locator('cache-aside')).toHaveCount(0)
   await expect(page).toHaveURL(/\?screen=create$/)
   await expect(page.getByLabel('Your goal')).toHaveValue(originalRequest)

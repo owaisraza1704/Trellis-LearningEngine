@@ -11,10 +11,12 @@ Long learning conversations are hard to organize and resume. Trellis keeps topic
 ## Key Features
 
 - **Learning paths:** Generate topics and subtopics from a goal, or import a supplied curriculum while preserving its hierarchy and original input.
+- **Honest planning fallback:** When sources cannot support detailed curriculum claims for a broad goal, save a labelled learning outline with neutral topic descriptions; teaching answers still undergo evidence checks.
 - **Graph and outline:** Explore the path visually or browse every topic in a list.
 - **Focused tutoring:** Ask questions within a topic; use separate exploratory threads for related detours.
 - **Persistent state:** Resume the last study location and track progress across journeys.
 - **Source-backed answers:** Search attached material first, inspect cited excerpts, and use fetched web pages when more evidence is needed.
+- **GitHub source links:** A repository URL reads its default-branch README, including its headings and resource lists. Linked articles are separate sources.
 - **Answer review:** Check citations and grounding, attempt one correction when needed, and withhold unsupported answers. General-knowledge answers are labelled unverified.
 - **Notebook and export:** Save notes and source-linked material in journey notebooks, then export selected items as a PDF.
 
@@ -39,6 +41,8 @@ The UI calls the backend through a same-origin API. PostgreSQL stores learning s
 3. **Generate with evidence:** Retrieve stored passages, fetch web pages when needed, and generate cited answer blocks. If evidence is unavailable, an allowed general-knowledge answer is labelled unverified.
 4. **Review the answer:** Validate citation IDs and assess grounding. Correct once and recheck if needed; withhold answers that remain unsupported.
 5. **Keep learning:** Save interactions, progress, sources, and notebook material so the journey can be resumed.
+
+You can delete a journey from **My Journeys** after confirming what will be removed. Its learning history, notebook, and exports are deleted; sources you added return to the source library.
 
 ## Technical Architecture / Engineering Decisions
 

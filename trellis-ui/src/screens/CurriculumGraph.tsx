@@ -294,6 +294,19 @@ export default function CurriculumGraph({
           )}
         </div>
       )}
+      {assessment.status === 'plan_only' && (
+        <div
+          role="note"
+          aria-label="Learning outline source status"
+          className="mb-5 rounded-xl border border-[#D9E1D7] bg-[#F2F6F0] px-5 py-4 text-sm text-[#3D5D40]"
+        >
+          <p className="font-medium">This is a learning outline from your goal.</p>
+          <p className="mt-1">
+            The detailed curriculum draft did not pass review, so these topics have neutral
+            descriptions. Trellis checks evidence when you study each one.
+          </p>
+        </div>
+      )}
       <details className="mb-5 rounded-xl border border-[#E3E0D8] bg-white px-5 py-4">
         <summary className="cursor-pointer text-sm font-medium text-[#5B7A58]">
           Original request
@@ -330,7 +343,11 @@ export default function CurriculumGraph({
               Recorded when this journey was created. Later edits have not been reassessed.
             </p>
             <p className="text-xs text-[#7A7870]">
-              {generation.mode === 'outline' ? 'Imported outline' : 'Generated learning path'}
+              {generation.basis === 'source_roadmap'
+                ? 'Imported source roadmap'
+                : generation.mode === 'outline'
+                  ? 'Imported outline'
+                  : 'Generated learning path'}
               {' · '}
               {generation.provider} / {generation.model}
               {' · '}
@@ -360,14 +377,17 @@ export default function CurriculumGraph({
               )}
             </dl>
             <p className="text-xs text-[#7A7870]">
-              Automated assessment can make mistakes. Review the retained sources when checking a
-              topic.
+              {generation.basis === 'source_roadmap'
+                ? 'Sections were extracted from the selected source. Review that source to confirm its structure.'
+                : 'Automated assessment can make mistakes. Review the retained sources when checking a topic.'}
             </p>
             {generation.evidence.length === 0 ? (
               <p className="text-sm text-[#7A7870]">
-                {generation.mode === 'outline'
-                  ? 'The supplied outline is the recorded curriculum basis.'
-                  : 'No source excerpts were recorded.'}
+                {generation.basis === 'source_roadmap'
+                  ? 'The selected source is the recorded curriculum basis.'
+                  : generation.mode === 'outline'
+                    ? 'The supplied outline is the recorded curriculum basis.'
+                    : 'No source excerpts were recorded.'}
               </p>
             ) : (
               <div className="max-h-80 space-y-3 overflow-y-auto">
