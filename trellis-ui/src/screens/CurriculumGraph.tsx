@@ -2,7 +2,18 @@ import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Background, Controls, MarkerType, Position, ReactFlow } from '@xyflow/react'
 import dagre from '@dagrejs/dagre'
-import { ArrowDown, ArrowUp, ArrowRight, List, Network, Pencil, Plus, Trash2 } from 'lucide-react'
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowRight,
+  ChevronDown,
+  ChevronRight,
+  List,
+  Network,
+  Pencil,
+  Plus,
+  Trash2,
+} from 'lucide-react'
 import '@xyflow/react/dist/style.css'
 import {
   api,
@@ -110,6 +121,7 @@ export default function CurriculumGraph({
   const client = useQueryClient()
   const [view, setView] = useState<'graph' | 'list'>('graph')
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set())
   const [editor, setEditor] = useState<LearningNode | 'new' | null>(null)
   const [editingPath, setEditingPath] = useState(false)
   const [title, setTitle] = useState('')
@@ -149,6 +161,20 @@ export default function CurriculumGraph({
   const nodeSources =
     generation?.evidence.filter((source) => selected?.evidence_ids?.includes(source.id)) || []
   const isSequence = nodes.length > 1 && nodes.every((node) => !node.parent_id)
+  const childrenByParent = new Map<string | null, LearningNode[]>()
+  for (const node of nodes) {
+    const siblings = childrenByParent.get(node.parent_id) || []
+    siblings.push(node)
+    childrenByParent.set(node.parent_id, siblings)
+  }
+  const outlineRows: { node: LearningNode; depth: number }[] = []
+  function addOutlineRows(parentId: string | null, depth: number) {
+    for (const node of childrenByParent.get(parentId) || []) {
+      outlineRows.push({ node, depth })
+      if (!collapsedIds.has(node.id)) addOutlineRows(node.id, depth + 1)
+    }
+  }
+  addOutlineRows(null, 0)
   const graph = useMemo(() => {
     const layout = new dagre.graphlib.Graph()
       .setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 75 })
@@ -231,9 +257,19 @@ export default function CurriculumGraph({
             })),
     }
   }, [nodes, selected?.id, activeNodeId, isSequence])
-  function reorder(index: number, delta: number) {
-    const ordered = nodes.map((node) => node.id)
-    ;[ordered[index], ordered[index + delta]] = [ordered[index + delta], ordered[index]]
+  function reorder(node: LearningNode, delta: number) {
+    const siblings = [...(childrenByParent.get(node.parent_id) || [])]
+    const index = siblings.findIndex((item) => item.id === node.id)
+    ;[siblings[index], siblings[index + delta]] = [siblings[index + delta], siblings[index]]
+    childrenByParent.set(node.parent_id, siblings)
+    const ordered: string[] = []
+    function appendBranch(parentId: string | null) {
+      for (const item of childrenByParent.get(parentId) || []) {
+        ordered.push(item.id)
+        appendBranch(item.id)
+      }
+    }
+    appendBranch(null)
     mutate.mutate({
       route: `/paths/${pathId}/reorder`,
       method: 'POST',
@@ -470,56 +506,83 @@ export default function CurriculumGraph({
             </>
           ) : (
             <div className="divide-y divide-[#F0EEE9]">
-              {nodes.map((node, index) => (
-                <div
-                  key={node.id}
-                  className={`flex items-center gap-3 p-4 ${
-                    selected?.id === node.id ? 'bg-[#F7F8FC]' : ''
-                  }`}
-                >
-                  <button
-                    className="min-w-0 flex-1 text-left"
-                    aria-current={node.id === activeNodeId ? 'step' : undefined}
-                    onClick={() => setSelectedId(node.id)}
+              {outlineRows.map(({ node, depth }) => {
+                const siblings = childrenByParent.get(node.parent_id) || []
+                const siblingIndex = siblings.findIndex((item) => item.id === node.id)
+                const hasChildren = (childrenByParent.get(node.id)?.length || 0) > 0
+                const collapsed = collapsedIds.has(node.id)
+                return (
+                  <div
+                    key={node.id}
+                    className={`flex items-center gap-3 py-4 pr-4 ${
+                      selected?.id === node.id ? 'bg-[#F7F8FC]' : ''
+                    }`}
+                    style={{ paddingLeft: 16 + depth * 24 }}
                   >
-                    <p className="text-sm font-medium">{node.title}</p>
-                    {node.id === activeNodeId && (
-                      <p className="mt-1 text-xs text-[#4A5FA5]">
-                        {node.status === 'not_started' ? 'Current topic' : 'Last studied'}
-                      </p>
+                    {hasChildren ? (
+                      <button
+                        className="icon-button flex h-7 w-7 flex-shrink-0 items-center justify-center !p-0"
+                        aria-label={`${collapsed ? 'Expand' : 'Collapse'} ${node.title}`}
+                        aria-expanded={!collapsed}
+                        onClick={() => {
+                          setCollapsedIds((current) => {
+                            const next = new Set(current)
+                            if (collapsed) next.delete(node.id)
+                            else next.add(node.id)
+                            return next
+                          })
+                          if (!collapsed) setSelectedId(node.id)
+                        }}
+                      >
+                        {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+                      </button>
+                    ) : (
+                      <span className="w-7 flex-shrink-0" aria-hidden="true" />
                     )}
-                    {node.parent_id && (
-                      <p className="mt-1 text-xs text-[#A8A5A0]">
-                        Under {nodes.find((parent) => parent.id === node.parent_id)?.title}
-                      </p>
-                    )}
-                  </button>
-                  <Status value={node.status} />
-                  <button
-                    aria-label={`Move ${node.title} up`}
-                    className="icon-button"
-                    disabled={index === 0 || mutate.isPending}
-                    onClick={() => reorder(index, -1)}
-                  >
-                    <ArrowUp size={14} />
-                  </button>
-                  <button
-                    aria-label={`Move ${node.title} down`}
-                    className="icon-button"
-                    disabled={index === nodes.length - 1 || mutate.isPending}
-                    onClick={() => reorder(index, 1)}
-                  >
-                    <ArrowDown size={14} />
-                  </button>
-                  <button
-                    aria-label={`Edit ${node.title}`}
-                    className="icon-button"
-                    onClick={() => setEditor(node)}
-                  >
-                    <Pencil size={14} />
-                  </button>
-                </div>
-              ))}
+                    <button
+                      className="min-w-0 flex-1 text-left"
+                      aria-current={node.id === activeNodeId ? 'step' : undefined}
+                      onClick={() => setSelectedId(node.id)}
+                    >
+                      <p className="text-sm font-medium">{node.title}</p>
+                      {node.id === activeNodeId && (
+                        <p className="mt-1 text-xs text-[#4A5FA5]">
+                          {node.status === 'not_started' ? 'Current topic' : 'Last studied'}
+                        </p>
+                      )}
+                      {node.parent_id && (
+                        <p className="mt-1 text-xs text-[#A8A5A0]">
+                          Under {nodes.find((parent) => parent.id === node.parent_id)?.title}
+                        </p>
+                      )}
+                    </button>
+                    <Status value={node.status} />
+                    <button
+                      aria-label={`Move ${node.title} up`}
+                      className="icon-button"
+                      disabled={siblingIndex === 0 || mutate.isPending}
+                      onClick={() => reorder(node, -1)}
+                    >
+                      <ArrowUp size={14} />
+                    </button>
+                    <button
+                      aria-label={`Move ${node.title} down`}
+                      className="icon-button"
+                      disabled={siblingIndex === siblings.length - 1 || mutate.isPending}
+                      onClick={() => reorder(node, 1)}
+                    >
+                      <ArrowDown size={14} />
+                    </button>
+                    <button
+                      aria-label={`Edit ${node.title}`}
+                      className="icon-button"
+                      onClick={() => setEditor(node)}
+                    >
+                      <Pencil size={14} />
+                    </button>
+                  </div>
+                )
+              })}
             </div>
           )}
         </div>

@@ -104,6 +104,7 @@ test('flat topics form a readable learning sequence without changing their hiera
   })
 
   await page.getByRole('button', { name: 'Outline', exact: true }).click()
+  await expect(page.getByRole('main').getByRole('button', { name: /^Collapse / })).toHaveCount(0)
   await expect(
     page.getByRole('button', { name: `${systemDesign.nodes[0].title} Current topic`, exact: true }),
   ).toHaveAttribute('aria-current', 'step')
@@ -178,5 +179,37 @@ test('a Python topic hierarchy keeps parent relationships and distinguishes stud
       exact: true,
     }),
   ).toHaveAttribute('aria-current', 'step')
-  expect(state.path.nodes.map((node) => node.parent_id)).toEqual([null, 'lists', 'lists', 'pop'])
+  const root = page.getByRole('button', { name: 'Python Lists', exact: true })
+  const child = page.getByRole('button', {
+    name: 'Removing Values with pop() Under Python Lists',
+    exact: true,
+  })
+  const grandchild = page.getByRole('button', {
+    name: 'Lists as Stacks Under Removing Values with pop()',
+    exact: true,
+  })
+  const rootX = await root.evaluate((element) => element.getBoundingClientRect().x)
+  const childX = await child.evaluate((element) => element.getBoundingClientRect().x)
+  const grandchildX = await grandchild.evaluate((element) => element.getBoundingClientRect().x)
+  expect(childX - rootX).toBeGreaterThanOrEqual(20)
+  expect(grandchildX - childX).toBeGreaterThanOrEqual(20)
+
+  await page.getByRole('button', { name: 'Collapse Removing Values with pop()' }).click()
+  await expect(grandchild).toHaveCount(0)
+  await expect(root).toBeVisible()
+  await page.getByRole('button', { name: 'Expand Removing Values with pop()' }).click()
+  await expect(grandchild).toBeVisible()
+  await page.getByRole('button', { name: 'Collapse Python Lists' }).click()
+  await expect(child).toHaveCount(0)
+  await page.getByRole('button', { name: 'Expand Python Lists' }).click()
+  await expect(child).toBeVisible()
+
+  await page.getByRole('button', { name: 'Move Removing Values with pop() up' }).click()
+  await expect.poll(() => state.reordered).toEqual([['lists', 'pop', 'stacks', 'append']])
+  expect(Object.fromEntries(state.path.nodes.map((node) => [node.id, node.parent_id]))).toEqual({
+    lists: null,
+    append: 'lists',
+    pop: 'lists',
+    stacks: 'pop',
+  })
 })
