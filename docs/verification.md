@@ -108,6 +108,26 @@ When sources and the bounded web attempt cannot provide sufficient evidence, ord
 
 The live model report contains **14 passing checks** and clearly identifies the injected evidence outage. It used a synthetic public discussion in a disposable schema, without reading or modifying learner history. Artifacts: `.data/verification/context-general-knowledge-live.json`, `.data/verification/context-general-knowledge-live.pdf`, `.data/verification/context-general-knowledge-browser-integration.json`, and the corresponding local verification scripts. These checks demonstrate the exercised flows; automated evaluation cannot guarantee correctness for every future answer.
 
+## Learning-goal scope preservation — September 26, 2026
+
+A saved GPU journey exposed a curriculum failure: its full four-phase request was retained, but the generated path contained six flat topics and its completeness assessment of 24% was accepted. Goal creation now plans from the entire request before retrieving evidence for each root topic. Recognized heading/list structure must survive planning and generation; useful inferred children must also survive the final generation. All parents and children count toward the explicit 40-node limit.
+
+Acceptance now requires completeness of at least 0.9, no reported missing topics, preserved hierarchy, valid per-topic citations, and the existing grounding gates. A negative independent goal review allows one revision with up to three focused evidence queries; the revised result must pass every gate. Outline import keeps a single generation and fidelity review without web retrieval or inferred additions. No failed final check creates a path or its nodes.
+
+The original request and input mode are visible in the curriculum. Older saved low-completeness assessments show a coverage warning without modifying their original result or the learner's content. A saved model score is an assessment, not a measured proportion of actual topic coverage.
+
+Regression cases for this change are in `backend/tests/test_curriculum_structure.py`, `backend/tests/test_curriculum_goals.py`, and `trellis-ui/tests/curriculum-input.spec.ts`. They target the four-phase/twelve-topic request, dropped or reparented topics, inferred children, evidence for later phases, rejection of low completeness and reported omissions, size limits, retained original input, and historical assessment display. The earlier live results above predate this curriculum change; they do not establish its live behavior.
+
+Verification for this change:
+
+- **198 backend tests passed**, including bounded correction, unchanged outline behavior, and rejection before path/node persistence. Ruff passed.
+- **78 browser tests passed** against the rebuilt production UI on port 3100 with mocked API fixtures. TypeScript, formatting, and the production build passed.
+- A separate read-only browser check used the real saved GPU journey and API. Its 24% warning, exact 1,898-character original request, Learning goal mode, and historically labelled passed result were verified without writes.
+- A real Azure run using the full GPU request produced a **28-node hierarchy**: four phases, twelve requested topics, and inferred children. Direct checks confirmed all explicit titles, order, parent relationships, and citation-ID membership. Retrieval covered all four phases; the first semantic review rejected insufficient support, and the single correction used three targeted searches. The final semantic review timed out. Other live attempts also encountered provider timeouts, so **successful end-to-end live creation remains unverified**. No accepted journey was saved from these attempts, and all disposable schemas were removed.
+- The local Docker app was rebuilt and restarted. A PostgreSQL backup was verified, and hashes of 13 learner-data tables matched before and after deployment.
+
+Local artifacts are under `.data/curriculum-fix/`: `production-ui-tests`, `legacy-production-browser.json` and its screenshots, `live-goal-final-review-timeout.json`, `live-structural-check.json`, and the other live-attempt reports. These distinguish real provider work from mocked regression tests and from final acceptance that could not be completed.
+
 ## Practical limits
 
 - Only the configured Azure provider has been tested live. OpenAI, OpenRouter and Ollama have SDK request-contract tests; their live operation requires credentials or a running local model with structured-output support.

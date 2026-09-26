@@ -13,8 +13,8 @@ Confirmed scope: all Phase 1 and Phase 2 requirements, single local workspace, n
 
 - `GET /health` -> `{status, database}`.
 - `GET /workspace` -> `{paths: PathSummary[], location: {path_id,node_id,thread_id}, location_detail: {path_title,node_title,thread_title}, stats: {paths,nodes,completed,notebook_items}}`.
-- `GET /paths` -> PathSummary[]. `POST /paths` with `{input, mode: "goal"|"outline", source_ids?: string[]}` -> PathDetail. AI service `generate_curriculum(session, input, mode, source_ids)` returns `{title,description,nodes:[{title,description,parent_index:null|number}], evidence?:[]}`. Parent indices refer to preceding nodes.
-- `GET /paths/{id}` -> PathDetail `{id,title,description,input,created_at,progress,nodes: Node[]}`. `PATCH` accepts title/description.
+- `GET /paths` -> PathSummary[]. `POST /paths` with `{input, mode: "goal"|"outline", source_ids?: string[]}` -> PathDetail. AI service `generate_curriculum(session, input, mode, source_ids)` returns `{title,description,nodes:[{title,description,parent_index:null|number,evidence_ids:string[]}],evidence,generation}`. Parent indices refer to preceding nodes. Curriculum policy is specified below; rejected generation does not create a path or its nodes.
+- `GET /paths/{id}` -> PathDetail `{id,title,description,input,created_at,progress,nodes: Node[],generation}`. `PATCH` accepts title/description. The UI displays the original input and recorded mode separately from editable curriculum content.
 - `POST /paths/{id}/nodes` with `{title,description,parent_id?}` -> Node.
 - `POST /paths/{id}/reorder` with `{node_ids}` -> PathDetail. Exact complete permutation required.
 - `PATCH /nodes/{id}` with title/description/parent_id. `PATCH /nodes/{id}/progress` with `{status:"not_started"|"in_progress"|"completed"}` -> Node.
@@ -36,6 +36,16 @@ PathSummary has id/title/description/progress/node_count/completed_count/updated
 - Use packages for parsing/chunking/embeddings/search; preserve URL and page/section metadata. pgvector `Vector()` stores embeddings with profile string so profile/dimension mismatches cannot be compared. No ANN index is required at local corpus scale.
 - Source-backed answer: retrieve first, prioritize supplied evidence, use actual fetched web content, request structured cited output, validate citation membership and model-assisted relevance/completeness/faithfulness. Correct a failed draft once at unchanged thresholds; invalid citations, failed evaluation, or a still-rejected correction remain withheld.
 - General-knowledge fallback: after evidence is unavailable or drafting identifies insufficient coverage and the bounded web attempt cannot fill it, make a separate generation call without the rejected draft or evaluation feedback. Persist status `unverified`, empty evidence, and evaluation.method `model_knowledge`; do not fabricate citations or scores. Sources only and source-specific requests prevent fallback. A failed grounding/citation check never unlocks fallback. The UI labels all unverified responses and keeps that provenance in saved material.
+
+### Curriculum policy
+
+- In `goal` mode, `GoalPlan` reads the full original request before evidence lookup. It retains explicitly requested topics and can infer useful children. Each root has a concise search query of at most 500 characters derived from its scope; retrieval runs for each root using the same selected sources, and evidence is deduplicated across results.
+- `curriculum.outline_paths` recognizes Markdown heading and labelled/short list-item paths. Their titles, order, and direct parent relationships must survive both planning and generation. The final goal curriculum must also preserve every planned title and parent relationship. These deterministic checks protect recognized structure; review against the full input checks details and prose that are not structural anchors.
+- At most 40 nodes are allowed in total, including parents and children. More than 40 recognized requested nodes returns 422; oversized model output returns 502. Neither case truncates the curriculum or creates a partial journey.
+- Each generated node must cite valid retrieved evidence IDs. `CurriculumEvaluation` must report `completeness >= 0.9`, empty `missing_topics`, and `hierarchy_preserved: true`, plus `supported: true`, `grounding >= 0.9`, `consistency >= 0.9`, and `relevance >= 0.6`. Coverage is assessed against the entire original request, not merely the retrieved sources or planned titles.
+- A negative independent goal review permits one bounded correction: up to three focused evidence queries, one revised curriculum, and another independent review. The planned structure and all acceptance gates still apply. A failed final check returns an explicit error; it does not save the rejected curriculum or lower the thresholds.
+- In `outline` mode, one generation and one fidelity review preserve the supplied topics, ordering, hierarchy, and meaning. There is no goal-planning step, web retrieval, correction loop, or inferred addition. Evidence IDs remain empty because the supplied outline is the authority.
+- `LearningPath.generation` retains the original curriculum, evidence, provider/model, timestamp, and assessment; goal records also retain planning and search metadata. Learner edits do not rewrite or reassess that snapshot. The UI shows a warning for saved assessments below the completeness threshold, with missing topics, or with `hierarchy_preserved: false`, while preserving and labelling their originally recorded result.
 
 ## Notebook/export API
 

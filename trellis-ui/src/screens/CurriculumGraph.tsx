@@ -142,6 +142,10 @@ export default function CurriculumGraph({
     nodes[0]
   const generation = path.data?.generation?.created_at ? path.data.generation : null
   const assessment = generation?.evaluation || {}
+  const incompleteRequest =
+    (typeof assessment.completeness === 'number' && assessment.completeness < 0.9) ||
+    (Array.isArray(assessment.missing_topics) && assessment.missing_topics.length > 0) ||
+    assessment.hierarchy_preserved === false
   const nodeSources =
     generation?.evidence.filter((source) => selected?.evidence_ids?.includes(source.id)) || []
   const isSequence = nodes.length > 1 && nodes.every((node) => !node.parent_id)
@@ -273,6 +277,45 @@ export default function CurriculumGraph({
           </button>
         </div>
       </div>
+      {incompleteRequest && (
+        <div
+          role="note"
+          aria-label="Saved curriculum coverage"
+          className="mb-5 rounded-xl border border-[#E9DCB7] bg-[#FFFAEF] px-5 py-4 text-sm text-[#825C28]"
+        >
+          <p>
+            Some requested topics may be missing. Review the original request alongside this
+            curriculum.
+          </p>
+          {typeof assessment.completeness === 'number' && (
+            <p className="mt-2 text-xs">
+              Saved completeness assessment: {Math.round(assessment.completeness * 100)}%.
+            </p>
+          )}
+        </div>
+      )}
+      <details className="mb-5 rounded-xl border border-[#E3E0D8] bg-white px-5 py-4">
+        <summary className="cursor-pointer text-sm font-medium text-[#5B7A58]">
+          Original request
+        </summary>
+        <dl className="mt-4 text-xs">
+          <dt className="text-[#7A7870]">Input type</dt>
+          <dd className="mt-1 font-medium">
+            {path.data.generation?.mode === 'goal'
+              ? 'Learning goal'
+              : path.data.generation?.mode === 'outline'
+                ? 'Existing curriculum'
+                : 'Not recorded for this journey'}
+          </dd>
+        </dl>
+        <div
+          role="region"
+          aria-label="Original request text"
+          className="mt-4 whitespace-pre-wrap break-words text-sm leading-relaxed text-[#3D3C38]"
+        >
+          {path.data.input}
+        </div>
+      </details>
       <details className="mb-5 rounded-xl border border-[#E3E0D8] bg-white px-5 py-4">
         <summary className="cursor-pointer text-sm font-medium text-[#5B7A58]">
           Original curriculum sources and assessment
@@ -293,7 +336,12 @@ export default function CurriculumGraph({
               {' · '}
               {date(generation.created_at)}
             </p>
-            {typeof assessment.status === 'string' && <Status value={assessment.status} />}
+            {typeof assessment.status === 'string' && (
+              <div className="flex items-center gap-2 text-xs text-[#7A7870]">
+                <span>Originally recorded result:</span>
+                <Status value={assessment.status} />
+              </div>
+            )}
             {typeof assessment.explanation === 'string' && (
               <p className="text-sm text-[#3D3C38]">
                 {assessmentText(assessment.explanation, generation.evidence)}

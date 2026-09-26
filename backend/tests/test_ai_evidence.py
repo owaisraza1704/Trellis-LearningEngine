@@ -232,8 +232,9 @@ def test_nested_curriculum_derives_valid_parent_references(monkeypatch):
     )
     results = iter([
         curriculum,
-        ai.Evaluation(relevance=1, completeness=1, consistency=1, grounding=1,
-                      supported=True, explanation="The outline is faithfully represented."),
+        ai.CurriculumEvaluation(relevance=1, completeness=1, consistency=1, grounding=1,
+                      supported=True, explanation="The outline is faithfully represented.",
+                      missing_topics=[], hierarchy_preserved=True),
     ])
     monkeypatch.setattr(ai, "structured_completion", lambda *args: next(results))
     monkeypatch.setattr(evidence, "retrieve_evidence", lambda *args, **kwargs: pytest.fail("Outline imports use the supplied outline"))
@@ -250,8 +251,13 @@ def test_nested_curriculum_derives_valid_parent_references(monkeypatch):
 def test_goal_curriculum_requires_valid_citations_for_every_node(monkeypatch, supported_answer, evidence_ids):
     calls = []
 
-    def complete(*args):
-        calls.append(args)
+    def complete(provider, model, schema, messages):
+        calls.append(schema)
+        if schema == ai.GoalPlan:
+            return ai.GoalPlan(title="Functions", description="A course", nodes=[ai.GoalBranch(
+                title="Definitions", description="Define functions", children=[],
+                search_query="Python function definitions",
+            )])
         return ai.Curriculum(title="Functions", description="A course", nodes=[ai.CurriculumNode(
             title="Definitions", description="Define functions", evidence_ids=evidence_ids, children=[],
         )])
@@ -261,16 +267,21 @@ def test_goal_curriculum_requires_valid_citations_for_every_node(monkeypatch, su
         ai.generate_curriculum(None, "Learn function definitions", "goal", [])
     assert error.value.status_code == 502
     assert "valid source references" in error.value.detail
-    assert len(calls) == 1
+    assert calls == [ai.GoalPlan, ai.Curriculum]
 
 
 def test_goal_curriculum_returns_exact_provenance_after_support_check(monkeypatch, supported_answer):
     results = iter([
+        ai.GoalPlan(title="Functions", description="Learn definitions", nodes=[ai.GoalBranch(
+            title="Definitions", description="Define functions", children=[],
+            search_query="Python function definitions",
+        )]),
         ai.Curriculum(title="Functions", description="Learn definitions", nodes=[ai.CurriculumNode(
             title="Definitions", description="Define functions", evidence_ids=["chunk-one"], children=[],
         )]),
-        ai.Evaluation(relevance=1, completeness=1, consistency=1, grounding=1,
-                      supported=True, explanation="The cited excerpt supports each topic."),
+        ai.CurriculumEvaluation(relevance=1, completeness=1, consistency=1, grounding=1,
+                      supported=True, explanation="The cited excerpt supports each topic.",
+                      missing_topics=[], hierarchy_preserved=True),
     ])
     calls = []
 
@@ -289,17 +300,25 @@ def test_goal_curriculum_returns_exact_provenance_after_support_check(monkeypatc
     assert result["generation"]["nodes"] == result["nodes"]
     assert result["generation"]["evaluation"]["status"] == "passed"
     assert result["generation"]["created_at"]
-    assert [schema for schema, _ in calls] == [ai.Curriculum, ai.Evaluation]
-    assert calls[1][1]["curriculum"]["nodes"][0]["evidence_ids"] == ["chunk-one"]
+    assert [schema for schema, _ in calls] == [ai.GoalPlan, ai.Curriculum, ai.CurriculumEvaluation]
+    assert calls[2][1]["curriculum"]["nodes"][0]["evidence_ids"] == ["chunk-one"]
 
 
 def test_goal_curriculum_rejects_unsupported_topics_despite_valid_ids(monkeypatch, supported_answer):
+    curriculum = ai.Curriculum(title="Functions", description="A course", nodes=[ai.CurriculumNode(
+        title="Quantum functions", description="Invented topic", evidence_ids=["chunk-one"], children=[],
+    )])
+    rejected = ai.CurriculumEvaluation(
+        relevance=1, completeness=1, consistency=0.1, grounding=0.1, supported=False,
+        explanation="The cited excerpt does not support this topic.",
+        missing_topics=[], hierarchy_preserved=True,
+    )
     results = iter([
-        ai.Curriculum(title="Functions", description="A course", nodes=[ai.CurriculumNode(
-            title="Quantum functions", description="Invented topic", evidence_ids=["chunk-one"], children=[],
+        ai.GoalPlan(title="Functions", description="A course", nodes=[ai.GoalBranch(
+            title="Quantum functions", description="Invented topic", children=[],
+            search_query="Python function definitions",
         )]),
-        ai.Evaluation(relevance=1, completeness=1, consistency=0.1, grounding=0.1,
-                      supported=False, explanation="The cited excerpt does not support this topic."),
+        curriculum, rejected, curriculum, rejected,
     ])
     monkeypatch.setattr(ai, "structured_completion", lambda *args: next(results))
     with pytest.raises(HTTPException) as error:
@@ -313,8 +332,9 @@ def test_outline_import_rejects_invented_or_omitted_topics(monkeypatch, supporte
         ai.Curriculum(title="Functions", description="A course", nodes=[ai.CurriculumNode(
             title="Definitions", description="Define functions", evidence_ids=[], children=[],
         )]),
-        ai.Evaluation(relevance=1, completeness=completeness, consistency=1, grounding=1,
-                      supported=supported, explanation="The original outline was not preserved."),
+        ai.CurriculumEvaluation(relevance=1, completeness=completeness, consistency=1, grounding=1,
+                      supported=supported, explanation="The original outline was not preserved.",
+                      missing_topics=[], hierarchy_preserved=True),
     ])
     monkeypatch.setattr(ai, "structured_completion", lambda *args: next(results))
     monkeypatch.setattr(evidence, "retrieve_evidence", lambda *args, **kwargs: pytest.fail("No web for outline imports"))

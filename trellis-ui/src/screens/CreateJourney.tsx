@@ -49,7 +49,8 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
         </p>
         <h1 className="font-display text-4xl font-light">What do you want to learn?</h1>
         <p className="mt-3 text-sm text-[#7A7870]">
-          Start with a goal or bring a curriculum. Trellis will build a connected path.
+          Start with a learning goal or an existing curriculum. Both support phases, topics and
+          subtopics.
         </p>
       </div>
       <form
@@ -62,6 +63,7 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
           <button
             type="button"
             disabled={create.isPending}
+            aria-pressed={mode === 'goal'}
             className={mode === 'goal' ? 'btn' : 'btn-secondary'}
             onClick={() => setMode('goal')}
           >
@@ -70,17 +72,24 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
           <button
             type="button"
             disabled={create.isPending}
+            aria-pressed={mode === 'outline'}
             className={mode === 'outline' ? 'btn' : 'btn-secondary'}
             onClick={() => setMode('outline')}
           >
             Existing curriculum
           </button>
         </div>
+        <p id="journey-mode-description" className="mb-4 text-sm leading-relaxed text-[#7A7870]">
+          {mode === 'goal'
+            ? 'Trellis plans a learning path from your goal and preserves any phases, topics and subtopics you explicitly request.'
+            : 'Trellis uses your supplied outline, keeping its phases, topics and subtopics in their hierarchy.'}
+        </p>
         <label className="field-label" htmlFor="journey-input">
           {mode === 'goal' ? 'Your goal' : 'Curriculum or syllabus'}
         </label>
         <textarea
           id="journey-input"
+          aria-describedby="journey-mode-description"
           required
           disabled={create.isPending}
           className="field min-h-40"
@@ -210,7 +219,8 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
         </button>
         {create.isPending && (
           <p role="status" className="mt-3 text-center text-xs text-[#7A7870]">
-            Organizing concepts and checking the available material. This can take a minute.
+            Building your curriculum and checking it against your request. Larger curricula can take
+            longer.
           </p>
         )}
       </form>
