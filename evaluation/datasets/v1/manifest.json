@@ -1,0 +1,343 @@
+{
+  "dataset_id": "trellis-evidence-benchmark",
+  "dataset_version": "1.0.0",
+  "schema_version": 1,
+  "created_at": "2026-09-26",
+  "review_status": "pending_human_review",
+  "authored_by": "OpenAI Codex (AI)",
+  "human_reviewed": false,
+  "case_count": 96,
+  "source_count": 80,
+  "category_counts": {
+    "comparison": 16,
+    "conflict": 16,
+    "followup": 16,
+    "missing_evidence": 16,
+    "normal": 16,
+    "source_constraint": 16
+  },
+  "split_counts": {
+    "dev": 48,
+    "test": 48
+  },
+  "split_category_counts": {
+    "dev": {
+      "comparison": 8,
+      "conflict": 8,
+      "followup": 8,
+      "missing_evidence": 8,
+      "normal": 8,
+      "source_constraint": 8
+    },
+    "test": {
+      "comparison": 8,
+      "conflict": 8,
+      "followup": 8,
+      "missing_evidence": 8,
+      "normal": 8,
+      "source_constraint": 8
+    }
+  },
+  "expected_status_counts": {
+    "abstained": 16,
+    "answered": 72,
+    "unverified": 8
+  },
+  "source_kind_counts": {
+    "supplied": 64,
+    "web": 16
+  },
+  "provenance_counts": {
+    "curated_reference": 40,
+    "synthetic_fixture": 40
+  },
+  "provenance": {
+    "curated_references": "AI-authored short paraphrases and stated illustrative examples, with public attribution URLs for independent checking. No verbatim documentation snapshots or live URL verification are claimed.",
+    "synthetic_fixtures": "Original fictional classroom/project notes for disagreement, evidence gaps, and source restrictions. Web fixtures are fixed local strings, not fetched search results.",
+    "references_authored_before_runs": true,
+    "independent_human_labels": false
+  },
+  "split_policy": {
+    "unit": "topic family",
+    "description": "All questions, follow-ups, fictional projects, and source passages for a family belong to one split. Dev and test have disjoint family and source IDs; distractors come only from the same split. Similar evaluation categories exist in both splits, but topic families and facts are not paraphrase-split across them.",
+    "dev_usage": "Use dev for prompt, retrieval, and threshold iteration.",
+    "test_usage": "Use test after changes are chosen. Treat inspecting or tuning against individual test outcomes as holdout contamination; record that fact and author fresh families for a new test version before claiming an untouched holdout.",
+    "security_boundary": false
+  },
+  "question_families": [
+    {
+      "id": "collections",
+      "title": "Python collections",
+      "split": "dev",
+      "case_ids": [
+        "dev_collections_normal_01",
+        "dev_collections_normal_02",
+        "dev_collections_followup_01",
+        "dev_collections_followup_02",
+        "dev_collections_comparison_01",
+        "dev_collections_comparison_02",
+        "dev_collections_conflict_01",
+        "dev_collections_conflict_02",
+        "dev_collections_missing_evidence_01",
+        "dev_collections_missing_evidence_02",
+        "dev_collections_source_constraint_01",
+        "dev_collections_source_constraint_02"
+      ],
+      "source_ids": [
+        "src_dev_collections_sequences",
+        "src_dev_collections_sets",
+        "src_dev_collections_mappings",
+        "src_dev_collections_deque",
+        "src_dev_collections_draft_a",
+        "src_dev_collections_draft_b",
+        "src_dev_collections_overview",
+        "src_dev_collections_policy",
+        "src_dev_collections_web_reference",
+        "src_dev_collections_web_policy"
+      ]
+    },
+    {
+      "id": "http_cache",
+      "title": "HTTP caching",
+      "split": "dev",
+      "case_ids": [
+        "dev_http_cache_normal_01",
+        "dev_http_cache_normal_02",
+        "dev_http_cache_followup_01",
+        "dev_http_cache_followup_02",
+        "dev_http_cache_comparison_01",
+        "dev_http_cache_comparison_02",
+        "dev_http_cache_conflict_01",
+        "dev_http_cache_conflict_02",
+        "dev_http_cache_missing_evidence_01",
+        "dev_http_cache_missing_evidence_02",
+        "dev_http_cache_source_constraint_01",
+        "dev_http_cache_source_constraint_02"
+      ],
+      "source_ids": [
+        "src_dev_http_cache_storage",
+        "src_dev_http_cache_freshness",
+        "src_dev_http_cache_validation",
+        "src_dev_http_cache_vary",
+        "src_dev_http_cache_draft_a",
+        "src_dev_http_cache_draft_b",
+        "src_dev_http_cache_overview",
+        "src_dev_http_cache_policy",
+        "src_dev_http_cache_web_reference",
+        "src_dev_http_cache_web_policy"
+      ]
+    },
+    {
+      "id": "throughput",
+      "title": "Throughput and scaling",
+      "split": "dev",
+      "case_ids": [
+        "dev_throughput_normal_01",
+        "dev_throughput_normal_02",
+        "dev_throughput_followup_01",
+        "dev_throughput_followup_02",
+        "dev_throughput_comparison_01",
+        "dev_throughput_comparison_02",
+        "dev_throughput_conflict_01",
+        "dev_throughput_conflict_02",
+        "dev_throughput_missing_evidence_01",
+        "dev_throughput_missing_evidence_02",
+        "dev_throughput_source_constraint_01",
+        "dev_throughput_source_constraint_02"
+      ],
+      "source_ids": [
+        "src_dev_throughput_qps",
+        "src_dev_throughput_latency",
+        "src_dev_throughput_scaling",
+        "src_dev_throughput_little",
+        "src_dev_throughput_draft_a",
+        "src_dev_throughput_draft_b",
+        "src_dev_throughput_overview",
+        "src_dev_throughput_policy",
+        "src_dev_throughput_web_reference",
+        "src_dev_throughput_web_policy"
+      ]
+    },
+    {
+      "id": "concurrency",
+      "title": "Python concurrency",
+      "split": "dev",
+      "case_ids": [
+        "dev_concurrency_normal_01",
+        "dev_concurrency_normal_02",
+        "dev_concurrency_followup_01",
+        "dev_concurrency_followup_02",
+        "dev_concurrency_comparison_01",
+        "dev_concurrency_comparison_02",
+        "dev_concurrency_conflict_01",
+        "dev_concurrency_conflict_02",
+        "dev_concurrency_missing_evidence_01",
+        "dev_concurrency_missing_evidence_02",
+        "dev_concurrency_source_constraint_01",
+        "dev_concurrency_source_constraint_02"
+      ],
+      "source_ids": [
+        "src_dev_concurrency_asyncio",
+        "src_dev_concurrency_threads",
+        "src_dev_concurrency_locks",
+        "src_dev_concurrency_taskgroup",
+        "src_dev_concurrency_draft_a",
+        "src_dev_concurrency_draft_b",
+        "src_dev_concurrency_overview",
+        "src_dev_concurrency_policy",
+        "src_dev_concurrency_web_reference",
+        "src_dev_concurrency_web_policy"
+      ]
+    },
+    {
+      "id": "sql",
+      "title": "Relational SQL",
+      "split": "test",
+      "case_ids": [
+        "test_sql_normal_01",
+        "test_sql_normal_02",
+        "test_sql_followup_01",
+        "test_sql_followup_02",
+        "test_sql_comparison_01",
+        "test_sql_comparison_02",
+        "test_sql_conflict_01",
+        "test_sql_conflict_02",
+        "test_sql_missing_evidence_01",
+        "test_sql_missing_evidence_02",
+        "test_sql_source_constraint_01",
+        "test_sql_source_constraint_02"
+      ],
+      "source_ids": [
+        "src_test_sql_nulls",
+        "src_test_sql_joins",
+        "src_test_sql_counts",
+        "src_test_sql_transactions",
+        "src_test_sql_draft_a",
+        "src_test_sql_draft_b",
+        "src_test_sql_overview",
+        "src_test_sql_policy",
+        "src_test_sql_web_reference",
+        "src_test_sql_web_policy"
+      ]
+    },
+    {
+      "id": "git",
+      "title": "Git history and working state",
+      "split": "test",
+      "case_ids": [
+        "test_git_normal_01",
+        "test_git_normal_02",
+        "test_git_followup_01",
+        "test_git_followup_02",
+        "test_git_comparison_01",
+        "test_git_comparison_02",
+        "test_git_conflict_01",
+        "test_git_conflict_02",
+        "test_git_missing_evidence_01",
+        "test_git_missing_evidence_02",
+        "test_git_source_constraint_01",
+        "test_git_source_constraint_02"
+      ],
+      "source_ids": [
+        "src_test_git_commits",
+        "src_test_git_integration",
+        "src_test_git_undo",
+        "src_test_git_staging",
+        "src_test_git_draft_a",
+        "src_test_git_draft_b",
+        "src_test_git_overview",
+        "src_test_git_policy",
+        "src_test_git_web_reference",
+        "src_test_git_web_policy"
+      ]
+    },
+    {
+      "id": "queues",
+      "title": "Message delivery and consumers",
+      "split": "test",
+      "case_ids": [
+        "test_queues_normal_01",
+        "test_queues_normal_02",
+        "test_queues_followup_01",
+        "test_queues_followup_02",
+        "test_queues_comparison_01",
+        "test_queues_comparison_02",
+        "test_queues_conflict_01",
+        "test_queues_conflict_02",
+        "test_queues_missing_evidence_01",
+        "test_queues_missing_evidence_02",
+        "test_queues_source_constraint_01",
+        "test_queues_source_constraint_02"
+      ],
+      "source_ids": [
+        "src_test_queues_acks",
+        "src_test_queues_idempotency",
+        "src_test_queues_confirms",
+        "src_test_queues_prefetch",
+        "src_test_queues_draft_a",
+        "src_test_queues_draft_b",
+        "src_test_queues_overview",
+        "src_test_queues_policy",
+        "src_test_queues_web_reference",
+        "src_test_queues_web_policy"
+      ]
+    },
+    {
+      "id": "networking",
+      "title": "DNS and transport protocols",
+      "split": "test",
+      "case_ids": [
+        "test_networking_normal_01",
+        "test_networking_normal_02",
+        "test_networking_followup_01",
+        "test_networking_followup_02",
+        "test_networking_comparison_01",
+        "test_networking_comparison_02",
+        "test_networking_conflict_01",
+        "test_networking_conflict_02",
+        "test_networking_missing_evidence_01",
+        "test_networking_missing_evidence_02",
+        "test_networking_source_constraint_01",
+        "test_networking_source_constraint_02"
+      ],
+      "source_ids": [
+        "src_test_networking_dns_ttl",
+        "src_test_networking_tcp",
+        "src_test_networking_udp",
+        "src_test_networking_negative_dns",
+        "src_test_networking_draft_a",
+        "src_test_networking_draft_b",
+        "src_test_networking_overview",
+        "src_test_networking_policy",
+        "src_test_networking_web_reference",
+        "src_test_networking_web_policy"
+      ]
+    }
+  ],
+  "retrieval_design": {
+    "standard_supplied_pool_size": 12,
+    "fallback_supplied_pool_size": 11,
+    "fixed_web_fallback_cases": 8,
+    "gold_unit": "source passage",
+    "passage_character_limit_exclusive": 1600,
+    "empty_gold_cases": 24,
+    "empty_gold_policy": "Evidence-absent cases have no positive retrieval gold. Retrieval recall and ranking metrics are undefined for those cases and should be excluded rather than assigned 0 or 1.",
+    "duplicate_passage_policy": "Each family's fourth reference has an identical web-kind copy for a forced-fallback case. Only one copy is available in an evidence-answerable case. Both copies remain in the same split.",
+    "candidate_order": "Candidate IDs in each case are deterministically permuted by SHA-256 of v1:case_id:source_id. The order does not consult gold labels; it is not a relevance ranking."
+  },
+  "intended_scope": [
+    "Small offline reference set for evidence retrieval, answer relevance and completeness, grounding, abstention, source priority, and conversation resolution.",
+    "Every family has one elliptical follow-up, one explicit topic switch, one fixed-web-fallback question, and two conflicting-draft questions.",
+    "Expected answers describe the factual core and necessary limitations, not exact wording or a model-generated target response.",
+    "Source-only unread-document prompts start with the checkbox false so the resolver must preserve the restriction expressed in the question; supplied-policy cases explicitly set it true."
+  ],
+  "limits": [
+    "All cases and labels were authored by AI and remain pending independent human review. No result on this version is a human-validated quality or release claim.",
+    "The small, English-only software-education set is not a representative sample of all learning domains or production users.",
+    "Fixed short passages omit live search quality, extraction/OCR, long-document chunking, changing pages, authentication, provider availability, and real user interaction.",
+    "The topic-family split reduces direct paraphrase leakage but is not a blinded or statistically powered benchmark.",
+    "Question/reference authorship may share model-family biases with a generator or judge. Human review and judge calibration are required for stronger conclusions.",
+    "URLs identify review targets; source text is a curated paraphrase and may contain errors until checked. Synthetic project names, values, incidents, and policies are not real facts.",
+    "Conflict labels require an answered summary that exposes both claims and the absence of authority; choosing a winner is incorrect. Abstention and unverified labels must also be checked for content and citation behavior."
+  ]
+}

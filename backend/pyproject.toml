@@ -13,10 +13,14 @@ dependencies = [
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "ruff>=0.11,<1", "pymupdf>=1.25,<2"]
+evaluation = [
+    "deepeval==4.2.6",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = "-p no:deepeval"
 
 [tool.ruff]
 line-length = 100

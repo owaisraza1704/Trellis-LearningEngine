@@ -62,6 +62,7 @@ PDF uploads need extractable text (OCR for scanned documents is not included). F
 
 ## Verification and code orientation
 
+- [Offline evaluation benchmark](docs/evaluation.md): 96 versioned cases, DeepEval judging, a one-pass RAG comparison, retrieval and citation metrics, and separate pipeline/judge token usage. Run `make eval-validate` without model calls, or `make eval` to evaluate the 48-case test split using configured models. Reference labels await human review; fixed web fixtures do not measure live search quality.
 - `make test`: PostgreSQL-backed backend tests, Python lint, and frontend type checking. Tests create and remove isolated schemas; they do not clear learner data.
 - `make build`: production frontend build.
 - `cd trellis-ui && pnpm exec playwright install chromium && pnpm test:e2e`: browser regressions against a running UI on port 3100. Intercepted API tests verify UI behavior independently of external models.

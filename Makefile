@@ -1,4 +1,6 @@
-.PHONY: setup dev test build up down
+.PHONY: setup dev test build up down eval-validate eval-test eval
+
+EVAL_ARGS ?= --split test
 
 setup:
 	cd backend && uv sync --frozen --python 3.12
@@ -22,3 +24,12 @@ up:
 
 down:
 	docker compose --profile app down
+
+eval-validate:
+	cd backend && uv run --frozen --group evaluation python -m trellis_eval validate
+
+eval-test:
+	cd backend && uv run --frozen --group evaluation pytest -q tests/test_benchmark_dataset.py tests/test_benchmark_metrics.py tests/test_benchmark_report.py tests/test_benchmark_runner.py tests/test_usage_collection.py
+
+eval:
+	cd backend && uv run --frozen --group evaluation python -m trellis_eval run $(EVAL_ARGS)

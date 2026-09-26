@@ -2,6 +2,9 @@
 
 import json
 import re
+import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Literal
 from urllib.parse import urlsplit, urlunsplit
@@ -22,6 +25,33 @@ PROVIDERS = {
     "openrouter": "OpenRouter",
     "ollama": "Ollama",
 }
+
+_usage_events: ContextVar[list[dict] | None] = ContextVar("trellis_usage_events", default=None)
+
+
+@contextmanager
+def collect_usage():
+    """Opt-in request measurements; never retain prompts, credentials, or answer text."""
+    events = []
+    token = _usage_events.set(events)
+    try:
+        yield events
+    finally:
+        _usage_events.reset(token)
+
+
+def record_usage(kind: str, provider: str, model: str, operation: str, started: float, response):
+    events = _usage_events.get()
+    if events is None:
+        return
+    usage = getattr(response, "usage", None)
+    events.append({
+        "kind": kind, "provider": provider, "model": model, "operation": operation,
+        "seconds": time.perf_counter() - started,
+        "input_tokens": getattr(usage, "prompt_tokens", None),
+        "output_tokens": getattr(usage, "completion_tokens", None) if kind == "chat" else 0,
+        "total_tokens": getattr(usage, "total_tokens", None),
+    })
 
 
 class Output(BaseModel):
@@ -161,6 +191,8 @@ def provider_error(error: Exception) -> HTTPException:
 def structured_completion(provider: str, model: str, schema: type[Output], messages: list):
     if not model.strip():
         raise HTTPException(503, "Select a model or configure its deployment in .env.")
+    response = None
+    started = time.perf_counter()
     try:
         with client_for(provider) as client:
             response = client.chat.completions.parse(
@@ -177,6 +209,8 @@ def structured_completion(provider: str, model: str, schema: type[Output], messa
         return parsed
     except (openai.OpenAIError, ValidationError, ValueError) as error:
         raise provider_error(error) from None
+    finally:
+        record_usage("chat", provider, model, schema.__name__, started, response)
 
 
 def embedding_profile() -> tuple[str, str, int, str]:
@@ -208,9 +242,14 @@ def embed_texts(texts: list[str]) -> tuple[list[list[float]], str]:
         with client_for(provider) as client:
             for offset in range(0, len(texts), 32):
                 options = {"dimensions": dimensions} if provider != "ollama" else {}
-                response = client.embeddings.create(
-                    model=model, input=texts[offset:offset + 32], **options
-                )
+                response = None
+                started = time.perf_counter()
+                try:
+                    response = client.embeddings.create(
+                        model=model, input=texts[offset:offset + 32], **options
+                    )
+                finally:
+                    record_usage("embedding", provider, model, "embed_texts", started, response)
                 batch = sorted(response.data, key=lambda item: item.index)
                 vectors.extend(item.embedding for item in batch)
     except openai.OpenAIError as error:
