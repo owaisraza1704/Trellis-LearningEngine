@@ -1,59 +1,79 @@
-# Trellis
+# Trellis — AI-Powered Learning Workspace
 
-## An AI-Powered Learning Engine
+## Project Overview
 
-> Learn as a connected journey, not a collection of conversations.
-
-## Current UI
+Trellis turns a learning goal or syllabus into a structured journey with focused AI tutoring, evidence, and notes.
 
 ![Trellis UI preview](docs/assets/trellis-ui-preview.png)
 
-Trellis is a structured, context-preserving, and persistent learning environment. It turns a learning goal into a navigable curriculum, gives the learner a focused AI-assisted workspace for each topic, and keeps progress, exploration, evidence, and useful study material connected across sessions.
+Long learning conversations are hard to organize and resume. Trellis keeps topics, questions, sources, and progress connected so learners can build on earlier work.
 
-## Why Trellis exists
+## Key Features
 
-Conversational AI is good at explaining individual concepts, but long learning journeys can become fragmented. Related questions can pull a conversation away from its main topic, progress is difficult to resume, and useful explanations are rarely organized into a learner-owned study system.
+- **Learning paths:** Generate topics and subtopics from a goal, or import a supplied curriculum while preserving its hierarchy and original input.
+- **Graph and outline:** Explore the path visually or browse every topic in a list.
+- **Focused tutoring:** Ask questions within a topic; use separate exploratory threads for related detours.
+- **Persistent state:** Resume the last study location and track progress across journeys.
+- **Source-backed answers:** Search attached material first, inspect cited excerpts, and use fetched web pages when more evidence is needed.
+- **Answer review:** Check citations and grounding, attempt one correction when needed, and withhold unsupported answers. General-knowledge answers are labelled unverified.
+- **Notebook and export:** Save notes and source-linked material in journey notebooks, then export selected items as a PDF.
 
-Trellis addresses this by organizing learning around a curriculum structure instead of a single chat:
+## System Architecture
 
-```text
-Learning goal
-      |
-      v
-Structured learning path
-      |
-      v
-Active learning node
-      |
-      +--> Scoped AI interaction
-      |
-      +--> Exploratory thread
-      |
-      v
-Persistent progress, evidence, and study material
+```mermaid
+flowchart LR
+    Browser --> UI[Next.js UI]
+    UI -->|/api| API[FastAPI]
+    API --> DB[(PostgreSQL + pgvector)]
+    API --> Files[(Uploads and PDF exports)]
+    API --> Models[LLM and embedding providers]
+    API --> Web[Web search and page fetching]
 ```
 
-## What Trellis provides
+The UI calls the backend through a same-origin API. PostgreSQL stores learning state and searchable vectors; local files hold uploads and exports. [Architecture details](docs/architecture.md).
 
-- **Structured learning paths** - Turn a goal, topic, or supplied curriculum into topics, subtopics, and learning nodes.
-- **Node-based learning** - Give every topic its own focused learning environment and context.
-- **Context-preserving exploration** - Follow related concepts in independent threads without changing the primary learning path.
-- **Evidence-aware assistance** - Associate generated learning content with relevant sources and expose grounding and quality signals.
-- **Persistent learning state** - Preserve progress, history, active location, and session state so the learner can continue later.
-- **Learner-owned knowledge** - Save explanations, examples, source excerpts, and personal notes in a structured notebook.
-- **Study-session export** - Organize selected material and export it as a readable PDF.
+## How It Works
 
-Trellis is intended to be more than an AI tutor. Its purpose is to manage the structure, context, progression, and accumulated study material of the learning process.
+1. **Build a path:** Plan a hierarchy from the goal or preserve the structure of an imported syllabus. Save the original request and generation record.
+2. **Scope a question:** Load only the active topic or exploratory thread's context and search relevant, attached source passages.
+3. **Generate with evidence:** Retrieve stored passages, fetch web pages when needed, and generate cited answer blocks. If evidence is unavailable, an allowed general-knowledge answer is labelled unverified.
+4. **Review the answer:** Validate citation IDs and assess grounding. Correct once and recheck if needed; withhold answers that remain unsupported.
+5. **Keep learning:** Save interactions, progress, sources, and notebook material so the journey can be resumed.
 
-## Explicit non-goals
+## Technical Architecture / Engineering Decisions
 
-Trellis is not currently intended to be:
+- **FastAPI and SQLModel** keep API contracts and persistence close to the learning workflow. Source indexing runs as recoverable background work in the local API process.
+- **PostgreSQL + pgvector** store both application state and source embeddings; retrieval filters vectors by embedding profile.
+- **Scoped context** isolates topic and exploratory-thread histories so unrelated conversations do not leak into an answer.
+- **Provider abstraction** supports Azure OpenAI, OpenAI, OpenRouter, and Ollama. Evidence review improves the acceptance gate at a latency and token cost.
 
-- A conventional LMS or course marketplace.
-- A generic ChatGPT clone.
-- A fully autonomous mastery-based education platform.
-- A replacement for teachers or academic institutions.
-- A system that guarantees factual correctness merely because content has citations.
-- A project claiming statistically proven improvement in educational outcomes without a separate study.
+## Tech Stack
 
-The first objective is to demonstrate the technical and functional feasibility of a structured, persistent, context-preserving AI learning environment.
+| Layer | Technologies |
+| --- | --- |
+| Frontend | Next.js, React, TypeScript, TanStack Query, React Flow |
+| Backend | Python, FastAPI, SQLModel, Alembic |
+| AI and retrieval | OpenAI SDK, provider-selected models, pgvector, DDGS, HTTPX |
+| Storage and infrastructure | PostgreSQL, local file storage, Docker Compose |
+
+## Evaluation
+
+A versioned benchmark has **96 cases across six categories**, split evenly between development and test. It compares Trellis with a one-pass RAG baseline using the same model and embeddings, fixed evidence passages, and a DeepEval model judge. On **39 mutually scored test pairs**, Trellis's mean answer-correctness judge score was **0.905 vs. 0.636**, or **42% higher** relative to the baseline.
+
+This is a **model-judged score, not a measured factual-accuracy rate**. References were AI-authored, fixed passages replaced live web search, and the single run has not been independently calibrated against human judgments. [Evaluation method](docs/evaluation.md) · [Full results](evaluation/results/v1-initial.md).
+
+## Performance / Results
+
+| Test-split measure | One-pass RAG | Trellis |
+| --- | ---: | ---: |
+| Mean correctness judge score, 39 paired cases | 0.636 | 0.905 |
+| Model-judged citation precision | 95.1% | 98.6% |
+| Initial retrieval recall@8, 36 cases | 86.1% | 88.9% |
+| Median answer latency | 3.98 s | 9.93 s |
+| Product tokens used | 75,799 | 233,680 |
+
+Higher answer scores came with more model calls, latency, and token use. Monetary cost was not measured.
+
+## Run Locally
+
+Copy `.env.example` to `.env`, configure a chat provider and embedding model, then run `make setup` and `make up`. Open [localhost:3100](http://localhost:3100). Run `make test` for backend tests, lint, and frontend type checking.
