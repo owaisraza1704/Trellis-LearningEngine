@@ -2,6 +2,7 @@ from copy import deepcopy
 from html import escape
 import logging
 from pathlib import Path
+import re
 from typing import Annotated, Any
 from urllib.parse import urlsplit
 
@@ -148,6 +149,7 @@ def create_page(body: PageCreate, session: Database):
     pages = session.exec(select(NotebookPage).where(NotebookPage.path_id == body.path_id)).all()
     page = NotebookPage(path_id=body.path_id, title=body.title, position=len(pages))
     session.add(page)
+    activity(session, "notebook_updated", f"Created notebook section {page.title}", path_id=body.path_id)
     session.commit()
     session.refresh(page)
     return {**page.model_dump(), "items": []}
@@ -172,6 +174,7 @@ def update_page(page_id: str, body: PageUpdate, session: Database):
             entry.position = index
             session.add(entry)
     session.add(page)
+    activity(session, "notebook_updated", f"Updated notebook section {page.title}", path_id=path_id)
     session.commit()
     session.refresh(page)
     return {**page.model_dump(), "items": page_items(session, page.id)}
@@ -192,6 +195,7 @@ def delete_page(page_id: str, session: Database):
     for index, entry in enumerate(pages):
         entry.position = index
         session.add(entry)
+    activity(session, "notebook_updated", f"Removed notebook section {page.title}", path_id=path_id)
     session.commit()
 
 
@@ -272,8 +276,10 @@ def create_item(body: ItemCreate, session: Database):
         evidence=evidence,
     )
     session.add(item)
+    session.flush()
     activity(session, "notebook_saved", f"Saved {item.title} to notebook",
-             node=node, thread=thread, path_id=path.id)
+             node=node, thread=thread, path_id=path.id,
+             interaction_id=interaction.id if interaction else None, notebook_item_id=item.id)
     session.commit()
     session.refresh(item)
     return item
@@ -310,6 +316,8 @@ def update_item(item_id: str, body: ItemUpdate, session: Database):
     if body.content is not None:
         item.content = body.content
     session.add(item)
+    activity(session, "notebook_updated", f"Updated notebook note {item.title}",
+             path_id=path_id, notebook_item_id=item.id)
     session.commit()
     session.refresh(item)
     return item
@@ -318,7 +326,7 @@ def update_item(item_id: str, body: ItemUpdate, session: Database):
 @router.post("/notebook/pages/{page_id}/reorder")
 def reorder_items(page_id: str, body: ItemOrder, session: Database):
     page = require_record(session, NotebookPage, page_id)
-    assigned_path(page)
+    path_id = assigned_path(page)
     items = page_items(session, page_id)
     if len(body.item_ids) != len(items) or set(body.item_ids) != {item.id for item in items}:
         raise HTTPException(422, "Provide every note in this section exactly once.")
@@ -326,6 +334,7 @@ def reorder_items(page_id: str, body: ItemOrder, session: Database):
     for index, item_id in enumerate(body.item_ids):
         by_id[item_id].position = index
         session.add(by_id[item_id])
+    activity(session, "notebook_updated", f"Reordered notes in {page.title}", path_id=path_id)
     session.commit()
     return {**page.model_dump(), "items": page_items(session, page_id)}
 
@@ -344,6 +353,7 @@ def delete_item(item_id: str, session: Database):
         if item.id in study.item_ids:
             study.item_ids = [saved_id for saved_id in study.item_ids if saved_id != item.id]
             session.add(study)
+    activity(session, "notebook_updated", f"Removed notebook note {item.title}", path_id=item.path_id)
     session.delete(item)
     session.commit()
 
@@ -644,6 +654,27 @@ def markdown_flowables(content: str, styles, width: float):
     return blocks(0)[0]
 
 
+def repair_cited_fences(content: str) -> str:
+    """Repair old generated fence endings for display without changing stored notes."""
+    lines = []
+    fence = ""
+    for line in content.splitlines():
+        match = re.match(r"^ {0,3}(`{3,}|~{3,})(.*)$", line)
+        if match:
+            marker, suffix = match.groups()
+            if not fence and (marker[0] != "`" or "`" not in suffix):
+                fence = marker
+            elif fence and marker[0] == fence[0] and len(marker) >= len(fence):
+                if re.fullmatch(r"\s*(?:\[\d+\]\s*)+", suffix):
+                    lines.extend([line[:len(line) - len(suffix)], "", suffix.strip()])
+                    fence = ""
+                    continue
+                if not suffix.strip():
+                    fence = ""
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def render_pdf(record: ExportRecord, output: Path) -> None:
     styles = pdf_styles()
     document = SimpleDocTemplate(
@@ -669,7 +700,15 @@ def render_pdf(record: ExportRecord, output: Path) -> None:
             "Evidence excerpt" if item["kind"] == "evidence" else "Saved response"
         ))
         story.append(Paragraph("<br/>".join(escape(part) for part in context), styles["Context"]))
-        story.extend(markdown_flowables(item["content"], styles, document.width))
+        if item["kind"] == "response" and origin.get("status") == "unverified":
+            story.append(Paragraph(
+                "<b>General AI knowledge — not verified against sources</b><br/>"
+                "I could not find sufficient supporting sources. This explanation uses the "
+                "model’s general knowledge and may contain inaccuracies.",
+                styles["Context"],
+            ))
+        content = repair_cited_fences(item["content"]) if item["kind"] == "response" else item["content"]
+        story.extend(markdown_flowables(content, styles, document.width))
         if item.get("evidence"):
             story.append(Paragraph("Sources", styles["Heading3"]))
             for reference, evidence in enumerate(item["evidence"], start=1):
@@ -678,7 +717,11 @@ def render_pdf(record: ExportRecord, output: Path) -> None:
                     label += " - " + str(evidence["location"])
                 source = escape(label)
                 if evidence.get("url"):
-                    source += "<br/>" + escape(str(evidence["url"]))
+                    url = str(evidence["url"])
+                    if urlsplit(url).scheme in {"https", "http"}:
+                        source += f'<br/><link href="{escape(url, quote=True)}" color="#475b95">{escape(url)}</link>'
+                    else:
+                        source += "<br/>" + escape(url)
                 story.append(Paragraph(source, styles["Source"]))
         story.append(Spacer(1, 12))
 

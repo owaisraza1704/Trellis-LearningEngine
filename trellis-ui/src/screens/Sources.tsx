@@ -1,15 +1,19 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { FileText, Link as LinkIcon, Plus, RefreshCw, Trash2, Upload } from 'lucide-react'
-import { api, date, type Source } from '../lib/api'
+import { FileText, Link as LinkIcon, Plus, RefreshCw, Search, Trash2, Upload } from 'lucide-react'
+import { api, date, type Source, type Workspace } from '../lib/api'
+import { sourceOriginLabel } from '../lib/source'
+import { SourcePreview } from '../components/SourcePreview'
 import { Empty, ErrorNotice, Loading, Modal, Status } from '../components/ui'
 
 export function SourceForm({
   pathId,
   onDone,
+  submitLabel = 'Add Source',
 }: {
   pathId?: string
   onDone: (source: Source) => void
+  submitLabel?: string
 }) {
   const client = useQueryClient()
   const [kind, setKind] = useState('file')
@@ -129,7 +133,7 @@ export function SourceForm({
               : !title.trim() || !content.trim())
         }
       >
-        {submit.isPending ? 'Adding source…' : 'Add Source'}
+        {submit.isPending ? 'Adding source…' : submitLabel}
       </button>
     </form>
   )
@@ -137,26 +141,23 @@ export function SourceForm({
 
 export default function Sources({ pathId }: { pathId?: string }) {
   const client = useQueryClient()
-  const [scope, setScope] = useState<'all' | 'path'>(pathId ? 'path' : 'all')
   const [adding, setAdding] = useState(false)
   const [selected, setSelected] = useState<string | null>(null)
-  const filter = scope === 'path' ? pathId : undefined
+  const [search, setSearch] = useState('')
+  const [page, setPage] = useState(1)
+  const workspace = useQuery({
+    queryKey: ['workspace'],
+    queryFn: () => api<Workspace>('/workspace'),
+  })
   const sources = useQuery({
-    queryKey: ['sources', filter],
-    queryFn: () => api<Source[]>(`/sources${filter ? `?path_id=${filter}` : ''}`),
+    queryKey: ['sources', pathId],
+    queryFn: () => api<Source[]>(`/sources${pathId ? `?path_id=${pathId}` : ''}`),
     refetchInterval: (query) =>
       query.state.data?.some((source) =>
         ['processing', 'pending', 'queued'].includes(source.status),
       )
         ? 2000
         : false,
-  })
-  const detail = useQuery({
-    queryKey: ['source', selected],
-    queryFn: () => api<Source>(`/sources/${selected}`),
-    enabled: !!selected,
-    refetchInterval: (query) =>
-      ['pending', 'processing'].includes(query.state.data?.status || '') ? 2000 : false,
   })
   const action = useMutation({
     mutationFn: ({ id, remove }: { id: string; remove: boolean }) =>
@@ -167,36 +168,64 @@ export default function Sources({ pathId }: { pathId?: string }) {
       client.invalidateQueries({ queryKey: ['source'] })
     },
   })
+  const journeyNames = new Map(workspace.data?.paths.map((path) => [path.id, path.title]))
+  const journeyTitle = pathId ? journeyNames.get(pathId) : undefined
+  const addLabel = pathId ? 'Add source to this journey' : 'Add to library'
+  const query = search.trim().toLocaleLowerCase()
+  const matchingSources = (sources.data || []).filter((source) =>
+    [source.title, source.url, source.path_id && journeyNames.get(source.path_id)]
+      .filter(Boolean)
+      .join(' ')
+      .toLocaleLowerCase()
+      .includes(query),
+  )
+  const pageSize = 12
+  const pageCount = Math.max(1, Math.ceil(matchingSources.length / pageSize))
+  const currentPage = Math.min(page, pageCount)
+  const visibleSources = matchingSources.slice((currentPage - 1) * pageSize, currentPage * pageSize)
   return (
     <div className="screen-enter max-w-5xl mx-auto">
       <div className="mb-7 flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="font-display text-3xl font-light">Your sources</h1>
+          <h1 className="font-display text-3xl font-light">
+            {pathId ? `Sources for ${journeyTitle || 'this journey'}` : 'Source Library'}
+          </h1>
           <p className="mt-1 text-sm text-[#7A7870]">
-            The material behind your learning. Attach sources when creating a journey.
+            {pathId
+              ? 'Documents and links attached to this journey.'
+              : 'Your saved documents and links across all journeys.'}
+          </p>
+          <p className="mt-2 max-w-2xl text-sm text-[#7A7870]">
+            Your material comes first. Trellis adds useful web sources to each journey when your
+            questions need more evidence.
           </p>
         </div>
         <button className="btn" onClick={() => setAdding(true)}>
-          <Plus size={15} /> Add Source
+          <Plus size={15} /> {addLabel}
         </button>
       </div>
-      {pathId && (
-        <div className="mb-5 flex gap-2">
-          <button
-            className={scope === 'all' ? 'btn' : 'btn-secondary'}
-            onClick={() => setScope('all')}
-          >
-            All sources
-          </button>
-          <button
-            className={scope === 'path' ? 'btn' : 'btn-secondary'}
-            onClick={() => setScope('path')}
-          >
-            Current journey
-          </button>
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div className="relative w-full max-w-md">
+          <Search size={16} className="absolute left-3 top-3 text-[#A8A5A0]" />
+          <input
+            type="search"
+            aria-label="Search sources"
+            placeholder={pathId ? 'Search titles or URLs' : 'Search titles, URLs or journeys'}
+            className="field !pl-9"
+            value={search}
+            onChange={(event) => {
+              setSearch(event.target.value)
+              setPage(1)
+            }}
+          />
         </div>
-      )}
-      <ErrorNotice error={sources.error || action.error} />
+        {sources.data && (
+          <p role="status" className="text-sm text-[#7A7870]">
+            {matchingSources.length} {matchingSources.length === 1 ? 'source' : 'sources'}
+          </p>
+        )}
+      </div>
+      <ErrorNotice error={workspace.error || sources.error || action.error} />
       {sources.isPending && <Loading />}
       {sources.data?.length === 0 && (
         <Empty title="Bring your learning material">
@@ -206,10 +235,15 @@ export default function Sources({ pathId }: { pathId?: string }) {
           </p>
         </Empty>
       )}
+      {!!sources.data?.length && matchingSources.length === 0 && (
+        <Empty title="No sources match your search">
+          <p>Try a different title, URL or journey name.</p>
+        </Empty>
+      )}
       <div className="space-y-3">
-        {sources.data?.map((source) => (
+        {visibleSources.map((source) => (
           <article key={source.id} className="rounded-xl border border-[#E3E0D8] bg-white p-5">
-            <div className="flex items-start gap-3">
+            <div className="grid grid-cols-[20px_minmax(0,1fr)] items-start gap-3 sm:flex">
               <FileText size={20} className="mt-1 flex-shrink-0 text-[#5B7A58]" />
               <div className="min-w-0 flex-1">
                 <button
@@ -219,9 +253,14 @@ export default function Sources({ pathId }: { pathId?: string }) {
                   {source.title}
                 </button>
                 <p className="mt-1 text-xs text-[#A8A5A0]">
-                  {source.kind} · {source.chunk_count} passages ·{' '}
-                  {source.path_id ? 'Attached to a journey' : 'Available for a new journey'} ·{' '}
+                  <span>{source.kind === 'web' ? 'Found by Trellis' : 'Added by you'}</span> ·{' '}
+                  <span>{sourceOriginLabel(source.kind)}</span> · {source.chunk_count} passages ·{' '}
                   {date(source.created_at)}
+                </p>
+                <p className="mt-1 text-xs text-[#7A7870]">
+                  {source.path_id
+                    ? `Attached to: ${journeyNames.get(source.path_id) || 'Journey unavailable'}`
+                    : 'Not attached to a journey'}
                 </p>
                 {source.url && (
                   <a
@@ -240,85 +279,73 @@ export default function Sources({ pathId }: { pathId?: string }) {
                   </p>
                 )}
               </div>
-              <Status value={source.status} />
-              {['ready', 'failed'].includes(source.status) && (
+              <div className="col-start-2 flex flex-wrap items-center gap-2 sm:shrink-0 sm:flex-nowrap">
+                <Status value={source.status} />
+                {['ready', 'failed'].includes(source.status) && (
+                  <button
+                    title={source.status === 'failed' ? 'Retry source' : 'Reindex source'}
+                    aria-label={`${source.status === 'failed' ? 'Retry' : 'Reindex'} ${source.title}`}
+                    className="btn-secondary"
+                    disabled={action.isPending}
+                    onClick={() => action.mutate({ id: source.id, remove: false })}
+                  >
+                    <RefreshCw size={16} />
+                    {source.status === 'failed' ? 'Retry' : 'Reindex'}
+                  </button>
+                )}
                 <button
-                  title={source.status === 'failed' ? 'Retry source' : 'Reindex source'}
-                  aria-label={`${source.status === 'failed' ? 'Retry' : 'Reindex'} ${source.title}`}
-                  className="btn-secondary"
-                  disabled={action.isPending}
-                  onClick={() => action.mutate({ id: source.id, remove: false })}
+                  aria-label={`Delete ${source.title} permanently`}
+                  title="Delete permanently"
+                  className="icon-button"
+                  disabled={action.isPending || ['pending', 'processing'].includes(source.status)}
+                  onClick={() => {
+                    if (
+                      confirm(
+                        'Delete this source permanently? Its stored file and indexed passages will be removed. Evidence already saved in answers and notebooks will remain.',
+                      )
+                    )
+                      action.mutate({ id: source.id, remove: true })
+                  }}
                 >
-                  <RefreshCw size={16} />
-                  {source.status === 'failed' ? 'Retry' : 'Reindex'}
+                  <Trash2 size={16} />
                 </button>
-              )}
-              <button
-                aria-label={`Delete ${source.title}`}
-                className="icon-button"
-                disabled={action.isPending || ['pending', 'processing'].includes(source.status)}
-                onClick={() => {
-                  if (confirm('Remove this source? Previously saved evidence will remain.'))
-                    action.mutate({ id: source.id, remove: true })
-                }}
-              >
-                <Trash2 size={16} />
-              </button>
+              </div>
             </div>
           </article>
         ))}
       </div>
-      {adding && (
-        <Modal title="Add learning material" onClose={() => setAdding(false)}>
-          <p className="mb-4 text-sm text-[#7A7870]">
-            {filter
-              ? 'This source will be attached to the current journey.'
-              : 'This source will be available when creating a journey.'}
+      {pageCount > 1 && (
+        <nav aria-label="Source pages" className="mt-6 flex items-center justify-between gap-3">
+          <button
+            className="btn-secondary"
+            disabled={currentPage === 1}
+            onClick={() => setPage(currentPage - 1)}
+          >
+            Previous
+          </button>
+          <p className="text-sm text-[#7A7870]">
+            Page {currentPage} of {pageCount}
           </p>
-          <SourceForm pathId={filter} onDone={() => setAdding(false)} />
+          <button
+            className="btn-secondary"
+            disabled={currentPage === pageCount}
+            onClick={() => setPage(currentPage + 1)}
+          >
+            Next
+          </button>
+        </nav>
+      )}
+      {adding && (
+        <Modal title={addLabel} onClose={() => setAdding(false)}>
+          <p className="mb-4 text-sm text-[#7A7870]">
+            {pathId
+              ? `This source will be attached to ${journeyTitle || 'this journey'}.`
+              : 'This source will be saved in your library. Choose it when creating a journey.'}
+          </p>
+          <SourceForm pathId={pathId} submitLabel={addLabel} onDone={() => setAdding(false)} />
         </Modal>
       )}
-      {selected && (
-        <Modal title={detail.data?.title || 'Source passages'} onClose={() => setSelected(null)}>
-          {detail.isPending ? (
-            <Loading />
-          ) : (
-            <>
-              <ErrorNotice error={detail.error || detail.data?.error || action.error} />
-              {detail.data && (
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                  <Status value={detail.data.status} />
-                  {['ready', 'failed'].includes(detail.data.status) && (
-                    <button
-                      className="btn-secondary"
-                      disabled={action.isPending}
-                      onClick={() => action.mutate({ id: detail.data!.id, remove: false })}
-                    >
-                      <RefreshCw size={14} />{' '}
-                      {detail.data.status === 'failed' ? 'Retry source' : 'Reindex source'}
-                    </button>
-                  )}
-                </div>
-              )}
-              {detail.data?.needs_reindex && (
-                <p className="mb-4 text-sm text-[#946B32]">
-                  Reindex this source before using it with the current embedding settings.
-                </p>
-              )}
-              {detail.data?.excerpts?.map((excerpt, index) => (
-                <div key={index} className="mb-4 border-b border-[#E3E0D8] pb-4">
-                  <p className="mb-1 text-xs text-[#A8A5A0]">
-                    {excerpt.location || `Passage ${index + 1}`}
-                  </p>
-                  <p className="whitespace-pre-wrap text-sm">
-                    {excerpt.content || excerpt.text || excerpt.excerpt}
-                  </p>
-                </div>
-              ))}
-            </>
-          )}
-        </Modal>
-      )}
+      {selected && <SourcePreview sourceId={selected} onClose={() => setSelected(null)} />}
     </div>
   )
 }

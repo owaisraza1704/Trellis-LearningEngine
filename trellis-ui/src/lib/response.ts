@@ -1,6 +1,15 @@
 import type { Evidence, Interaction } from './api'
 
+export const generalKnowledgeLabel = 'General AI knowledge — not verified against sources'
+export const generalKnowledgeNotice =
+  'Trellis could not find sufficient supporting sources. This explanation uses the model’s general knowledge and may contain inaccuracies.'
+
 const withheldAnswers: Record<string, { label: string; message: string }> = {
+  general_knowledge_failed: {
+    label: 'AI response unavailable',
+    message:
+      'The AI provider could not complete a general-knowledge response. Try again in a moment or check your model connection in Settings.',
+  },
   evidence_unavailable: {
     label: 'Sources needed',
     message:
@@ -29,6 +38,8 @@ const withheldAnswers: Record<string, { label: string; message: string }> = {
 }
 
 export function responseFeedback(interaction: Interaction) {
+  if (interaction.status === 'unverified')
+    return { label: 'Unverified', message: interaction.content }
   if (interaction.status !== 'abstained') return { label: 'Answered', message: interaction.content }
   return (
     withheldAnswers[String(interaction.evaluation?.status)] || {

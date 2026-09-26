@@ -8,7 +8,8 @@ from sqlmodel import Session, select
 from . import ai
 from .db import get_session
 from .models import (
-    Activity, Interaction, LearningPath, LearningSession, Node, NotebookItem, Source, Thread, Workspace, utcnow,
+    Activity, Interaction, LearningPath, LearningSession, Node, NotebookItem, NotebookPage,
+    Source, Thread, Workspace, utcnow,
 )
 
 router = APIRouter()
@@ -47,18 +48,23 @@ def path_detail(session: Session, path: LearningPath) -> dict:
 
 
 def activity(session: Session, kind: str, label: str, node: Node | None = None,
-             thread: Thread | None = None, path_id: str | None = None):
+             thread: Thread | None = None, path_id: str | None = None,
+             interaction_id: str | None = None, notebook_item_id: str | None = None):
     session.add(Activity(kind=kind, label=label, path_id=node.path_id if node else path_id,
-                         node_id=node.id if node else None, thread_id=thread.id if thread else None))
+                         node_id=node.id if node else None, thread_id=thread.id if thread else None,
+                         interaction_id=interaction_id, notebook_item_id=notebook_item_id))
     if node or path_id:
         path = require(session, LearningPath, node.path_id if node else path_id)
         path.updated_at = utcnow()
         session.add(path)
-    period = session.exec(select(LearningSession).where(LearningSession.ended_at.is_(None))
-                          .order_by(LearningSession.started_at.desc())).first()
-    if period:
-        period.last_active_at = utcnow()
-        session.add(period)
+    if node and kind in {"interaction", "thread_interaction", "thread_created", "progress"}:
+        period = session.exec(select(LearningSession).where(
+            LearningSession.ended_at.is_(None), LearningSession.path_id == node.path_id,
+            LearningSession.node_id == node.id,
+        ).order_by(LearningSession.started_at.desc())).first()
+        if period:
+            period.last_active_at = utcnow()
+            session.add(period)
 
 
 def safe_thread_seed(session: Session, thread: Thread) -> str:
@@ -95,7 +101,8 @@ def build_context(session: Session, node: Node, thread: Thread | None = None) ->
         "node_count": session.exec(select(func.count()).select_from(Node).where(Node.path_id == path.id)).one(),
         "ancestors": ancestors, "progress": path_detail(session, path)["progress"],
         "history": [{"prompt": item.prompt,
-                     "content": item.content if item.status != "abstained" else WITHHELD_ANSWER}
+                     "content": item.content if item.status != "abstained" else WITHHELD_ANSWER,
+                     "status": item.status, "sources_only": item.evaluation.get("sources_only", False)}
                     for item in reversed(interactions)],
     }
     if thread:
@@ -156,6 +163,7 @@ class ProgressInput(RequestBody):
 class MessageInput(RequestBody):
     prompt: str = InputField(min_length=1, max_length=12000)
     action: Literal["foundation", "question", "example", "deeper", "comparison", "application"] = "question"
+    sources_only: bool = False
 
 
 class ThreadInput(RequestBody):
@@ -177,9 +185,50 @@ class LocationInput(RequestBody):
 @router.get("/paths")
 def list_paths(session: Session = Depends(get_session)):
     paths = session.exec(select(LearningPath).order_by(LearningPath.updated_at.desc())).all()
-    return [{key: value for key, value in path_detail(session, path).items()
-             if key not in {"nodes", "generation"}}
-            for path in paths]
+    node_counts = {
+        path_id: (count, completed)
+        for path_id, count, completed in session.exec(select(
+            Node.path_id, func.count(Node.id), func.count(Node.id).filter(Node.status == "completed"),
+        ).group_by(Node.path_id)).all()
+    }
+    # PostgreSQL returns one most recently studied location per journey.
+    latest_sessions = {
+        period.path_id: period
+        for period in session.exec(select(LearningSession)
+            .where(LearningSession.node_id.is_not(None))
+            .distinct(LearningSession.path_id)
+            .order_by(LearningSession.path_id, LearningSession.last_active_at.desc(),
+                      LearningSession.started_at.desc(), LearningSession.id)).all()
+    }
+    notebook_counts = {}
+    notebook_updated = {}
+    for path_id, count, created_at in session.exec(select(
+        NotebookItem.path_id, func.count(NotebookItem.id), func.max(NotebookItem.created_at),
+    ).group_by(NotebookItem.path_id)).all():
+        notebook_counts[path_id] = count
+        notebook_updated[path_id] = created_at
+    for model, timestamp, condition in (
+        (NotebookPage, NotebookPage.created_at, NotebookPage.path_id.is_not(None)),
+        (Activity, Activity.created_at, Activity.kind.startswith("notebook_")),
+    ):
+        for path_id, updated_at in session.exec(select(model.path_id, func.max(timestamp))
+                .where(condition).group_by(model.path_id)).all():
+            notebook_updated[path_id] = max(notebook_updated.get(path_id, updated_at), updated_at)
+    result = []
+    for path in paths:
+        count, completed = node_counts.get(path.id, (0, 0))
+        period = latest_sessions.get(path.id)
+        result.append({
+            **path.model_dump(exclude={"generation"}),
+            "node_count": count, "completed_count": completed,
+            "progress": round(100 * completed / count) if count else 0,
+            "resume": {"path_id": path.id, "node_id": period.node_id,
+                       "thread_id": period.thread_id} if period else None,
+            "last_studied_at": period.last_active_at if period else None,
+            "notebook_item_count": notebook_counts.get(path.id, 0),
+            "notebook_updated_at": notebook_updated.get(path.id),
+        })
+    return result
 
 
 @router.get("/workspace")
@@ -231,9 +280,6 @@ def create_path(body: PathInput, session: Session = Depends(get_session)):
     for source in sources:
         source.path_id = path.id
         session.add(source)
-    location = session.get(Workspace, 1) or Workspace()
-    location.path_id, location.node_id, location.thread_id = path.id, nodes[0].id, None
-    session.add(location)
     activity(session, "path_created", f"Created {path.title}", path_id=path.id)
     session.commit()
     return path_detail(session, path)
@@ -365,18 +411,21 @@ def update_progress(node_id: str, body: ProgressInput, session: Session = Depend
 def interact(session: Session, node: Node, body: MessageInput, thread: Thread | None = None):
     if thread and thread.status == "closed":
         raise HTTPException(409, "Reopen this thread before adding a message.")
-    result = ai.answer(session, build_context(session, node, thread), body.prompt)
+    context = build_context(session, node, thread)
+    context["sources_only"] = body.sources_only
+    result = ai.answer(session, context, body.prompt)
     interaction = Interaction(path_id=node.path_id, node_id=node.id,
                               thread_id=thread.id if thread else None, prompt=body.prompt,
                               action=body.action, **result)
     session.add(interaction)
+    session.flush()
     # Thread conversations never mutate primary-node progress or location.
     if not thread:
         # Progress may have changed in another request while the answer was generated.
         session.exec(update(Node).where(Node.id == node.id, Node.status == "not_started")
                      .values(status="in_progress"))
     activity(session, "thread_interaction" if thread else "interaction", body.prompt[:160],
-             node=node, thread=thread)
+             node=node, thread=thread, interaction_id=interaction.id)
     session.commit()
     session.refresh(interaction)
     return interaction
@@ -396,6 +445,8 @@ def create_thread(node_id: str, body: ThreadInput, session: Session = Depends(ge
         if source.node_id != node.id or source.thread_id:
             raise HTTPException(422, "Start a thread from a response in this primary node.")
         explanation = source.content if source.status != "abstained" else WITHHELD_ANSWER
+        if source.status == "unverified":
+            explanation = "General AI knowledge, not verified against sources:\n" + explanation
         seed += f"\nStarting question: {source.prompt}\nStarting explanation: {explanation}"
     thread = Thread(node_id=node.id, path_id=node.path_id, title=body.title, seed_context=seed)
     session.add(thread)
@@ -440,7 +491,7 @@ def set_location(body: LocationInput, session: Session = Depends(get_session)):
             body.node_id, body.thread_id = location.node_id, location.thread_id
         else:
             previous = session.exec(select(LearningSession).where(
-                LearningSession.path_id == body.path_id
+                LearningSession.path_id == body.path_id, LearningSession.node_id.is_not(None),
             ).order_by(LearningSession.last_active_at.desc())).first()
             if previous:
                 body.node_id, body.thread_id = previous.node_id, previous.thread_id
@@ -459,11 +510,11 @@ def set_location(body: LocationInput, session: Session = Depends(get_session)):
     session.add(location)
     period = session.exec(select(LearningSession).where(LearningSession.ended_at.is_(None))
                           .order_by(LearningSession.started_at.desc())).first()
-    if body.path_id:
-        if period and period.path_id != body.path_id:
-            period.ended_at = utcnow()
-            session.add(period)
-            period = None
+    if period and (period.path_id != body.path_id or body.node_id is None):
+        period.ended_at = utcnow()
+        session.add(period)
+        period = None
+    if body.node_id:
         if period is None:
             period = LearningSession(path_id=body.path_id)
         period.path_id, period.node_id, period.thread_id = body.path_id, body.node_id, body.thread_id
@@ -480,7 +531,16 @@ def history(session: Session = Depends(get_session)):
 
 @router.get("/learning-sessions")
 def learning_sessions(session: Session = Depends(get_session)):
-    return session.exec(select(LearningSession).order_by(LearningSession.started_at.desc())).all()
+    periods = session.exec(select(LearningSession).order_by(LearningSession.started_at.desc())).all()
+    result = []
+    for period in periods:
+        path = session.get(LearningPath, period.path_id)
+        node = session.get(Node, period.node_id) if period.node_id else None
+        thread = session.get(Thread, period.thread_id) if period.thread_id else None
+        result.append({**period.model_dump(), "path_title": path.title if path else None,
+                       "node_title": node.title if node else None,
+                       "thread_title": thread.title if thread else None})
+    return result
 
 
 @router.post("/learning-sessions/end")

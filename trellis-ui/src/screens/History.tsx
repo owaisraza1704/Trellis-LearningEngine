@@ -8,6 +8,9 @@ interface LearningSession {
   path_id: string
   node_id?: string
   thread_id?: string
+  path_title?: string | null
+  node_title?: string | null
+  thread_title?: string | null
   started_at: string
   last_active_at: string
   ended_at?: string
@@ -43,6 +46,11 @@ export default function History({ onNavigate }: { onNavigate: Navigate }) {
         <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#C5D9C4] bg-[#EFF4EE] p-5">
           <div>
             <p className="text-sm font-medium text-[#5B7A58]">Current study session</p>
+            <p className="mt-1 text-sm">
+              {[active.path_title, active.node_title, active.thread_title]
+                .filter(Boolean)
+                .join(' › ')}
+            </p>
             <p className="mt-1 text-xs text-[#7A7870]">Started {date(active.started_at)}</p>
           </div>
           <div className="flex gap-2">
@@ -74,7 +82,12 @@ export default function History({ onNavigate }: { onNavigate: Navigate }) {
             <button
               key={item.id}
               className="flex w-full items-center gap-4 rounded-xl border border-[#E3E0D8] bg-white p-4 text-left hover:border-[#B8B5AD]"
-              onClick={() => onNavigate(item.node_id ? 'node' : 'graph', item)}
+              onClick={() =>
+                onNavigate(
+                  item.kind.startsWith('notebook_') ? 'notebook' : item.node_id ? 'node' : 'graph',
+                  item,
+                )
+              }
             >
               <span className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-[#F0EEE9] text-[#5B7A58]">
                 <Clock size={16} />
@@ -101,13 +114,27 @@ export default function History({ onNavigate }: { onNavigate: Navigate }) {
               >
                 <div>
                   <p className="text-sm">{date(session.started_at)}</p>
+                  <p className="mt-1 text-sm">
+                    {[session.path_title, session.node_title, session.thread_title]
+                      .filter(Boolean)
+                      .join(' › ')}
+                  </p>
                   <p className="mt-1 text-xs text-[#A8A5A0]">
                     {session.ended_at
                       ? `Ended ${date(session.ended_at)}`
                       : `Last activity ${date(session.last_active_at)}`}
                   </p>
                 </div>
-                <Status value={session.ended_at ? 'closed' : 'open'} />
+                <div className="flex items-center gap-3">
+                  <Status value={session.ended_at ? 'closed' : 'open'} />
+                  <button
+                    className="btn-secondary"
+                    aria-label={`Resume session from ${date(session.started_at)}`}
+                    onClick={() => onNavigate(session.node_id ? 'node' : 'graph', session)}
+                  >
+                    Resume <ArrowRight size={13} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>

@@ -4,6 +4,7 @@ import shutil
 
 import pymupdf
 import pytest
+from markdown_it import MarkdownIt
 
 from trellis import notebook
 from trellis.models import ExportRecord, Interaction, LearningPath, Node, NotebookItem, NotebookPage, StudySet, Thread
@@ -52,6 +53,9 @@ def test_saved_response_keeps_immutable_origin_while_moving_and_editing(client, 
     assert saved["origin"]["node_title"] == "Transactions"
     assert saved["origin"]["thread_title"] == "Isolation levels"
     assert saved["kind"] == "response"
+    event = client.get("/api/history").json()[0]
+    assert event["notebook_item_id"] == saved["id"]
+    assert event["interaction_id"] == learning_origin["interaction"]
     assert client.delete(f'/api/notebook/pages/{page["id"]}').status_code == 409
 
     interaction = session.get(Interaction, learning_origin["interaction"])
@@ -97,7 +101,7 @@ def test_origin_and_evidence_membership_are_validated(client, learning_origin):
     assert excerpt.json()["origin"]["interaction_id"] == learning_origin["interaction"]
 
 
-def test_scoped_note_refreshes_path_and_learning_session_activity(client, learning_origin):
+def test_scoped_note_refreshes_path_without_changing_last_studied(client, learning_origin):
     client.put("/api/location", json={"path_id": learning_origin["path"],
                                      "node_id": learning_origin["node"],
                                      "thread_id": learning_origin["thread"]})
@@ -109,11 +113,13 @@ def test_scoped_note_refreshes_path_and_learning_session_activity(client, learni
         "content": "My own understanding of atomicity."})
     assert saved.status_code == 201
     assert client.get(f'/api/paths/{learning_origin["path"]}').json()["updated_at"] > old_path
-    assert client.get("/api/learning-sessions").json()[0]["last_active_at"] > old_period
+    assert client.get("/api/learning-sessions").json()[0]["last_active_at"] == old_period
     event = client.get("/api/history").json()[0]
     assert event["kind"] == "notebook_saved"
     assert event["node_id"] == learning_origin["node"]
     assert event["thread_id"] == learning_origin["thread"]
+    assert event["notebook_item_id"] == saved.json()["id"]
+    assert event["interaction_id"] is None
 
 
 def test_withheld_answer_cannot_be_saved_as_teaching_content(client, session, learning_origin):
@@ -214,6 +220,9 @@ COMMIT;
             assert phrase in text
         assert "PRIVATE UNSELECTED" not in text
         assert "MUST NEVER APPEAR" not in text
+        links = {link.get("uri") for page in document for link in page.get_links()}
+        assert "https://www.postgresql.org/docs/current/tutorial-transactions.html" in links
+        assert "https://www.postgresql.org/docs/" in links
         for pdf_page in document:
             pixmap = pdf_page.get_pixmap()
             assert pixmap.width > 500 and pixmap.height > 700
@@ -257,6 +266,30 @@ def test_failed_export_preserves_material_and_selection(client, session, monkeyp
     assert record.snapshot[0]["content"] == "My original note"
     assert client.get(f'/api/exports/{record.id}').json()["status"] == "failed"
     assert client.post("/api/exports", json={"path_id": learning_origin["path"], "title": "Empty", "item_ids": []}).status_code == 422
+
+
+def test_pdf_repairs_legacy_response_fences_without_changing_snapshot(tmp_path):
+    original = "```python\nitems.append(4)\n``` [1]\n\nThe item is now last."
+    record = ExportRecord(title="Saved code", snapshot=[{
+        "title": "Append example", "kind": "response", "content": original,
+    }])
+    output = tmp_path / "legacy-response.pdf"
+    notebook.render_pdf(record, output)
+    with pymupdf.open(output) as document:
+        text = "\n".join(page.get_text() for page in document)
+    assert "items.append(4)" in text
+    assert "[1]" in text
+    assert "The item is now last." in text
+    assert "```" not in text
+    assert record.snapshot[0]["content"] == original
+
+
+def test_legacy_fence_repair_preserves_literal_shorter_fences():
+    original = "````markdown\n``` [1]\n````\n\n~~~python\nitems.append(4)\n~~~ [2] [3]"
+    tokens = MarkdownIt().parse(notebook.repair_cited_fences(original))
+    code = [token.content for token in tokens if token.type == "fence"]
+    assert code == ["``` [1]\n", "items.append(4)\n"]
+    assert any(token.content == "[2] [3]" for token in tokens if token.type == "inline")
 
 
 def test_pdf_download_survives_data_directory_relocation_and_legacy_paths(

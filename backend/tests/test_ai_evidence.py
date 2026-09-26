@@ -8,6 +8,7 @@ import httpx
 import openai
 import pytest
 from fastapi import HTTPException
+from markdown_it import MarkdownIt
 from reportlab.pdfgen import canvas
 from sqlmodel import select
 
@@ -23,6 +24,14 @@ EVIDENCE = {
 CONTEXT = {"path_id": "path-one", "path_title": "Python", "node_title": "Functions"}
 
 
+@pytest.fixture(autouse=True)
+def resolved_question(monkeypatch):
+    # Context resolution has its own tests; these exercise evidence and answer checks.
+    monkeypatch.setattr(ai, "resolve_question", lambda provider, model, context, prompt: ai.ResolvedQuestion(
+        question=prompt, search_query=prompt, sources_only=bool(context.get("sources_only")),
+    ))
+
+
 @pytest.fixture
 def supported_answer(monkeypatch):
     monkeypatch.setattr(ai, "selected_provider", lambda session: ("azure", "test-model"))
@@ -35,13 +44,13 @@ def supported_answer(monkeypatch):
     )
 
 
-def test_no_evidence_abstains_without_model_call(monkeypatch):
+def test_sources_only_without_evidence_does_not_generate_an_answer(monkeypatch):
     monkeypatch.setattr(ai, "selected_provider", lambda session: ("azure", "test-model"))
     monkeypatch.setattr(evidence, "retrieve_evidence", lambda *args, **kwargs: {
         "evidence": [], "warnings": ["Web search unavailable."],
     })
     monkeypatch.setattr(ai, "structured_completion", lambda *args: pytest.fail("Must not generate without evidence"))
-    result = ai.answer(None, CONTEXT, "Explain functions")
+    result = ai.answer(None, {**CONTEXT, "sources_only": True}, "Explain functions")
     assert result["status"] == "abstained"
     assert result["evaluation"]["status"] == "evidence_unavailable"
     assert "Add a relevant document or URL" in result["content"]
@@ -67,26 +76,45 @@ def test_missing_or_invented_citations_are_withheld(monkeypatch, supported_answe
 def test_supported_answer_records_exact_citations_and_evaluation(monkeypatch, supported_answer):
     results = iter([
         supported_answer,
-        ai.Evaluation(relevance=1, completeness=0.8, consistency=1, grounding=1,
+        ai.AnswerEvaluation(relevance=1, completeness=0.8, consistency=1, grounding=1,
                       supported=True, explanation="The cited excerpt supports the claim."),
     ])
     monkeypatch.setattr(ai, "structured_completion", lambda *args: next(results))
     answer = ai.answer(None, CONTEXT, "How are functions defined?")
-    assert answer["content"] == "Use `def` to define a function. [1]"
+    assert answer["content"] == "Use `def` to define a function.\n\n[1]"
     assert answer["evidence"] == [EVIDENCE]
     assert answer["evaluation"]["completeness"] == 0.8
     assert answer["evaluation"]["citations_valid"] is True
     assert answer["evaluation"]["evaluated_at"]
 
 
+def test_generated_citations_stay_outside_fenced_code(monkeypatch, supported_answer):
+    supported_answer.blocks[0].text = "Example:\n\n```python\nitems.append(4)\n```"
+    supported_answer.blocks.append(ai.AnswerBlock(
+        text="The item is added to the end.", evidence_ids=["chunk-one"],
+    ))
+    results = iter([
+        supported_answer,
+        ai.AnswerEvaluation(relevance=1, completeness=1, consistency=1, grounding=1,
+                      supported=True, explanation="The example is supported."),
+    ])
+    monkeypatch.setattr(ai, "structured_completion", lambda *args: next(results))
+    answer = ai.answer(None, CONTEXT, "Show append")
+    tokens = MarkdownIt().parse(answer["content"])
+    code = [token.content for token in tokens if token.type == "fence"]
+    assert code == ["items.append(4)\n"]
+    assert sum(token.content == "[1]" for token in tokens if token.type == "inline") == 2
+    assert any(token.content == "The item is added to the end." for token in tokens)
+
+
 def test_failed_correction_is_withheld_concisely(monkeypatch, supported_answer):
     internal_feedback = "Unsupported comparison in 851a8f96-7831-4ce2-aa5c-dad182fc51c5. " * 20
     results = iter([
         supported_answer,
-        ai.Evaluation(relevance=1, completeness=1, consistency=0.1, grounding=0.1,
+        ai.AnswerEvaluation(relevance=1, completeness=1, consistency=0.1, grounding=0.1,
                       supported=False, explanation=internal_feedback),
         supported_answer,
-        ai.Evaluation(relevance=1, completeness=1, consistency=1, grounding=0.89,
+        ai.AnswerEvaluation(relevance=1, completeness=1, consistency=1, grounding=0.89,
                       supported=True, explanation=internal_feedback),
     ])
     calls = []
@@ -113,10 +141,10 @@ def test_one_correction_uses_same_evidence_and_passes_fresh_evaluation(monkeypat
     feedback = "Remove the comparison with classes; the cited excerpt does not support it."
     results = iter([
         unsupported,
-        ai.Evaluation(relevance=1, completeness=1, consistency=0.2, grounding=0.5,
+        ai.AnswerEvaluation(relevance=1, completeness=1, consistency=0.2, grounding=0.5,
                       supported=False, explanation=feedback),
         supported_answer,
-        ai.Evaluation(relevance=1, completeness=1, consistency=1, grounding=1,
+        ai.AnswerEvaluation(relevance=1, completeness=1, consistency=1, grounding=1,
                       supported=True, explanation="Every remaining claim is supported."),
     ])
     calls = []
@@ -127,9 +155,9 @@ def test_one_correction_uses_same_evidence_and_passes_fresh_evaluation(monkeypat
 
     monkeypatch.setattr(ai, "structured_completion", complete)
     answer = ai.answer(None, CONTEXT, "How are functions defined?")
-    assert answer["content"] == "Use `def` to define a function. [1]"
+    assert answer["content"] == "Use `def` to define a function.\n\n[1]"
     assert answer["status"] == "answered"
-    assert [schema for schema, _ in calls] == [ai.DraftAnswer, ai.Evaluation, ai.DraftAnswer, ai.Evaluation]
+    assert [schema for schema, _ in calls] == [ai.DraftAnswer, ai.AnswerEvaluation, ai.DraftAnswer, ai.AnswerEvaluation]
     assert calls[2][1]["previous_answer"] == unsupported.model_dump()
     assert calls[2][1]["evaluation_feedback"] == feedback
     assert calls[2][1]["evidence"] == calls[0][1]["evidence"] == [EVIDENCE]
@@ -146,8 +174,8 @@ def test_correction_provider_failure_still_withholds(monkeypatch, supported_answ
         calls.append(schema)
         if len(calls) == 1:
             return supported_answer
-        if schema == ai.Evaluation:
-            return ai.Evaluation(relevance=1, completeness=1, consistency=0.2, grounding=0.2,
+        if schema == ai.AnswerEvaluation:
+            return ai.AnswerEvaluation(relevance=1, completeness=1, consistency=0.2, grounding=0.2,
                                  supported=False, explanation="Unsupported comparison.")
         raise HTTPException(503, "Correction provider unavailable.")
 
@@ -157,7 +185,7 @@ def test_correction_provider_failure_still_withholds(monkeypatch, supported_answ
     assert result["evaluation"]["status"] == "correction_failed"
     assert result["evaluation"]["correction_attempted"] is True
     assert "Use `def`" not in result["content"]
-    assert calls == [ai.DraftAnswer, ai.Evaluation, ai.DraftAnswer]
+    assert calls == [ai.DraftAnswer, ai.AnswerEvaluation, ai.DraftAnswer]
 
 
 def test_corrected_draft_must_still_pass_citation_membership(monkeypatch, supported_answer):
@@ -165,7 +193,7 @@ def test_corrected_draft_must_still_pass_citation_membership(monkeypatch, suppor
     invalid.blocks[0].evidence_ids = ["invented-after-correction"]
     results = iter([
         supported_answer,
-        ai.Evaluation(relevance=1, completeness=1, consistency=0.2, grounding=0.2,
+        ai.AnswerEvaluation(relevance=1, completeness=1, consistency=0.2, grounding=0.2,
                       supported=False, explanation="Unsupported comparison."),
         invalid,
     ])
@@ -302,15 +330,15 @@ def test_insufficient_cached_web_triggers_fresh_research(monkeypatch, supported_
     def retrieve(*args, **kwargs):
         calls.append(kwargs)
         if kwargs.get("supplement_web"):
-            return {"evidence": [new_evidence], "warnings": ["One web page was unavailable."]}
+            return {"evidence": [new_evidence], "warnings": ["One web page was unavailable."], "web_search_performed": True}
         return {"evidence": [dict(EVIDENCE)], "warnings": []}
 
     supported_answer.blocks[0].evidence_ids = ["new-chunk"]
     completions = iter([
         ai.DraftAnswer(status="insufficient", blocks=[], reason="The cached source is incomplete."),
         supported_answer,
-        ai.Evaluation(relevance=1, completeness=1, consistency=1, grounding=1,
-                      supported=True, explanation="The new excerpt supports the answer."),
+        ai.AnswerEvaluation(relevance=1, completeness=1, consistency=1, grounding=1,
+                            supported=True, explanation="The new excerpt supports the answer."),
     ])
     monkeypatch.setattr(evidence, "retrieve_evidence", retrieve)
     monkeypatch.setattr(ai, "structured_completion", lambda *args: next(completions))
@@ -319,6 +347,180 @@ def test_insufficient_cached_web_triggers_fresh_research(monkeypatch, supported_
     assert calls[1]["supplement_web"] is True
     assert result["evidence"] == [new_evidence]
     assert result["evaluation"]["retrieval_warnings"] == ["One web page was unavailable."]
+
+
+@pytest.mark.parametrize("gap_detected_by", ["draft", "review", "partial_review"])
+def test_missing_question_coverage_gets_targeted_web_evidence(monkeypatch, gap_detected_by):
+    monkeypatch.setattr(ai, "selected_provider", lambda session: ("azure", "test-model"))
+    supplied = {**EVIDENCE, "kind": "text"}
+    discovered = {
+        **EVIDENCE, "id": "web-chunk", "source_id": "web-source",
+        "excerpt": "A function may define default values for its parameters.",
+    }
+    search_query = "Python function default parameter values official documentation"
+    calls = []
+
+    def retrieve(session, query, **kwargs):
+        calls.append((query, kwargs))
+        return {
+            "evidence": [supplied, discovered] if kwargs.get("supplement_web") else [supplied],
+            "warnings": [], "web_search_performed": bool(kwargs.get("supplement_web")),
+        }
+
+    partial = ai.DraftAnswer(
+        status="answered", reason="", blocks=[ai.AnswerBlock(
+            text="Use def to define a function. The source does not cover parameter defaults.",
+            evidence_ids=[supplied["id"]],
+        )], missing_evidence=search_query if gap_detected_by == "draft" else "",
+    )
+    complete = ai.DraftAnswer(status="answered", reason="", blocks=[
+        ai.AnswerBlock(text="Use def to define a function.", evidence_ids=[supplied["id"]]),
+        ai.AnswerBlock(text="Parameters can have default values.", evidence_ids=[discovered["id"]]),
+    ])
+    outputs = [partial]
+    if gap_detected_by != "draft":
+        supported = gap_detected_by == "partial_review"
+        outputs.append(ai.AnswerEvaluation(
+            relevance=1, completeness=0.5, consistency=1, grounding=1 if supported else 0.5,
+            supported=supported, explanation="Need evidence for default parameter values.",
+            missing_evidence=search_query,
+        ))
+    outputs += [complete, ai.AnswerEvaluation(
+        relevance=1, completeness=1, consistency=1, grounding=1,
+        supported=True, explanation="Both parts are supported.",
+    )]
+    outputs = iter(outputs)
+    payloads = []
+
+    def completion(provider, model, schema, messages):
+        payloads.append(json.loads(messages[1]["content"]))
+        return next(outputs)
+
+    monkeypatch.setattr(evidence, "retrieve_evidence", retrieve)
+    monkeypatch.setattr(ai, "structured_completion", completion)
+    result = ai.answer(None, CONTEXT, "Explain function definitions and parameter defaults")
+    assert result["status"] == "answered"
+    assert result["evidence"] == [supplied, discovered]
+    assert calls[1] == (search_query, {"path_id": "path-one", "supplement_web": True})
+    assert len(calls) == 2
+    assert payloads[-1]["evidence"] == [supplied, discovered]
+    assert payloads[-1]["answer"] == complete.model_dump()
+    assert result["evaluation"]["web_search_performed"] is True
+    assert result["evaluation"]["web_search_query"] == search_query
+
+
+def test_failed_web_search_can_keep_a_checked_partial_answer(monkeypatch, supported_answer):
+    supported_answer.blocks[0].text += " The available evidence does not cover parameter defaults."
+    supported_answer.missing_evidence = "Python default parameters documentation"
+    calls = []
+
+    def retrieve(*args, **kwargs):
+        calls.append(kwargs)
+        return {
+            "evidence": [EVIDENCE],
+            "warnings": ["Web search is unavailable."] if kwargs.get("supplement_web") else [],
+            "web_search_performed": bool(kwargs.get("supplement_web")),
+        }
+
+    outputs = iter([supported_answer, ai.AnswerEvaluation(
+        relevance=1, completeness=0.5, consistency=1, grounding=1,
+        supported=True, explanation="Supported partial answer with a clear limitation.",
+        missing_evidence="Python default parameters documentation",
+    )])
+    monkeypatch.setattr(evidence, "retrieve_evidence", retrieve)
+    monkeypatch.setattr(ai, "structured_completion", lambda *args: next(outputs))
+    result = ai.answer(None, CONTEXT, "Explain functions and default parameters")
+    assert result["status"] == "answered"
+    assert "does not cover parameter defaults" in result["content"]
+    assert len(calls) == 2
+    assert result["evaluation"]["web_search_performed"] is True
+    assert result["evaluation"]["retrieval_warnings"] == ["Web search is unavailable."]
+
+
+def test_initial_web_search_counts_towards_the_question_budget(monkeypatch, supported_answer):
+    calls = []
+
+    def retrieve(*args, **kwargs):
+        calls.append(kwargs)
+        return {"evidence": [EVIDENCE], "warnings": [], "web_search_performed": True}
+
+    monkeypatch.setattr(evidence, "retrieve_evidence", retrieve)
+    monkeypatch.setattr(ai, "structured_completion", lambda *args: ai.DraftAnswer(
+        status="insufficient", blocks=[], reason="Missing parameter default documentation.",
+        missing_evidence="Python default parameters documentation",
+    ))
+    result = ai.answer(None, {**CONTEXT, "sources_only": True}, "Explain default parameters")
+    assert result["status"] == "abstained"
+    assert result["evaluation"]["status"] == "insufficient_evidence"
+    assert result["evaluation"]["web_search_performed"] is True
+    assert len(calls) == 1
+
+
+def test_embedding_failure_does_not_report_a_web_search(monkeypatch, supported_answer):
+    calls = []
+    supported_answer.missing_evidence = "Python parameter defaults"
+
+    def retrieve(*args, **kwargs):
+        calls.append(kwargs)
+        if kwargs.get("supplement_web"):
+            return {"evidence": [], "warnings": ["Embedding provider unavailable."],
+                    "web_search_performed": False}
+        return {"evidence": [EVIDENCE], "warnings": [], "web_search_performed": False}
+
+    outputs = iter([supported_answer, ai.AnswerEvaluation(
+        relevance=1, completeness=0.5, consistency=1, grounding=1, supported=True,
+        explanation="The supported portion is correct.", missing_evidence="Python parameter defaults",
+    )])
+    monkeypatch.setattr(evidence, "retrieve_evidence", retrieve)
+    monkeypatch.setattr(ai, "structured_completion", lambda *args: next(outputs))
+    result = ai.answer(None, CONTEXT, "Explain functions and parameter defaults")
+    assert result["status"] == "answered"
+    assert result["evaluation"]["web_search_performed"] is False
+    assert result["evaluation"]["web_search_query"] is None
+    assert result["evaluation"]["retrieval_warnings"] == ["Embedding provider unavailable."]
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("failure", ["unsupported", "provider", "citations"])
+def test_verified_partial_survives_unsuccessful_expansion(monkeypatch, supported_answer, failure):
+    supplied = {**EVIDENCE, "kind": "text"}
+    discovered = {**EVIDENCE, "id": "new-chunk", "source_id": "new-source"}
+    supported_answer.blocks[0].text += " The available evidence does not cover parameter defaults."
+    partial_check = ai.AnswerEvaluation(
+        relevance=1, completeness=0.5, consistency=1, grounding=1, supported=True,
+        explanation="The partial answer is supported and acknowledges the missing information.",
+        missing_evidence="Python parameter defaults documentation",
+    )
+    expanded = ai.DraftAnswer(status="answered", reason="", blocks=[ai.AnswerBlock(
+        text="An unsupported claim about defaults.",
+        evidence_ids=["invented"] if failure == "citations" else [discovered["id"]],
+    )])
+    outputs = iter([
+        supported_answer, partial_check,
+        HTTPException(503, "Provider unavailable.") if failure == "provider" else expanded,
+        ai.AnswerEvaluation(relevance=1, completeness=1, consistency=0.5, grounding=0.5,
+                            supported=False, explanation="The fuller draft is unsupported."),
+    ])
+
+    def complete(*args):
+        output = next(outputs)
+        if isinstance(output, Exception):
+            raise output
+        return output
+
+    monkeypatch.setattr(evidence, "retrieve_evidence", lambda *args, **kwargs: {
+        "evidence": [supplied, discovered] if kwargs.get("supplement_web") else [supplied],
+        "warnings": [], "web_search_performed": bool(kwargs.get("supplement_web")),
+    })
+    monkeypatch.setattr(ai, "structured_completion", complete)
+    result = ai.answer(None, CONTEXT, "Explain functions and parameter defaults")
+    assert result["status"] == "answered"
+    assert "does not cover parameter defaults" in result["content"]
+    assert "unsupported claim" not in result["content"]
+    assert result["evidence"] == [supplied]
+    assert result["evaluation"]["status"] == "passed"
+    assert result["evaluation"]["explanation"] == partial_check.explanation
+    assert result["evaluation"]["partial_answer_preserved"] is True
 
 
 @pytest.mark.parametrize("provider", ["azure", "openai", "openrouter", "ollama"])
@@ -442,6 +644,39 @@ def test_pdf_parser_preserves_page_locations(tmp_path, monkeypatch):
     assert sections[1][1] == "Page 2"
 
 
+@pytest.mark.parametrize("hidden", [True, False])
+def test_web_extraction_removes_only_hidden_authorization_template(monkeypatch, hidden):
+    article = """<h1>Cache-aside</h1>
+        <p>Load data on demand into a cache from a data store. Applications first check
+        the cache and load missing items from the origin store.</p>
+        <h2>Consistency</h2><p>The application must tolerate stale cache entries when
+        another process changes the origin store. Expiration limits their lifetime.</p>"""
+    html = f"""<html><head><title>Cache-aside</title></head><body><main>
+        <div unauthorized-private-section {'hidden' if hidden else ''}>
+        <p>Access to this page requires authorization. You can try signing in or changing directories.</p>
+        </div><div>{article}</div></main></body></html>"""
+    monkeypatch.setattr(evidence, "fetch_document", lambda url: (
+        html.encode(), "text/html", url,
+    ))
+    sections = evidence.document_sections(Source(
+        title="Cache", kind="url", url="https://learn.microsoft.com/example",
+    ))
+    assert "Load data on demand" in sections[0][0]
+    assert "Expiration limits" in sections[0][0]
+    assert ("requires authorization" in sections[0][0]) is not hidden
+
+
+def test_hidden_template_alone_is_not_readable_source_material(monkeypatch):
+    html = b"""<html><body><div unauthorized-private-section hidden>
+        <p>Access to this page requires authorization. You can try signing in or changing directories.</p>
+        </div></body></html>"""
+    monkeypatch.setattr(evidence, "fetch_document", lambda url: (html, "text/html", url))
+    with pytest.raises(HTTPException, match="No readable article text"):
+        evidence.document_sections(Source(
+            title="Unavailable", kind="url", url="https://learn.microsoft.com/example",
+        ))
+
+
 def test_indexing_failure_preserves_prior_chunks(session, monkeypatch):
     source = Source(title="Notes", kind="text", content="Functions use def.", status="ready", chunk_count=1)
     session.add(source)
@@ -482,7 +717,8 @@ def test_retrieval_is_path_scoped_and_filters_embedding_profiles(session, monkey
     monkeypatch.setattr(evidence, "embed_texts", lambda texts: ([[1, 0, 0]], "test:3"))
     monkeypatch.setattr(evidence, "web_sources", lambda *args: pytest.fail("Supplied source has priority"))
     result = evidence.retrieve_evidence(session, "Python functions", path_id=path.id)
-    assert [item["source_id"] for item in result["evidence"]] == [supplied.id]
+    assert [item["source_id"] for item in result["evidence"]] == [supplied.id, web.id]
+    assert result["web_search_performed"] is False
     assert result["evidence"][0]["excerpt"] == "Supplied Python functions"
 
 
@@ -512,7 +748,7 @@ def test_preferred_source_problems_are_named_when_web_evidence_is_used(session, 
     assert '"Scanned notes" failed to index' in warnings
     assert "No extractable text" in warnings
     assert '"Old course notes" uses a different embedding profile' in warnings
-    assert "uses web sources" in warnings
+    assert result["web_search_performed"] is False
     assert [item["source_id"] for item in result["evidence"]] == [web.id]
 
 

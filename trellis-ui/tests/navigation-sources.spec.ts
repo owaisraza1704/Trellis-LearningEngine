@@ -96,6 +96,7 @@ async function mockLearningWorkspace(page: Page, holdFirstWrite = false) {
     databases: location,
     networks: { path_id: 'networks', node_id: 'routing', thread_id: null },
   }
+  const studiedAt: Record<string, string> = { databases: created, networks: '2026-09-24T10:00:00Z' }
   const writes: Location[] = []
   let releaseFirstWrite = () => {}
   const firstWrite = new Promise<void>((resolve) => {
@@ -108,7 +109,7 @@ async function mockLearningWorkspace(page: Page, holdFirstWrite = false) {
     if (url === '/api/workspace')
       return route.fulfill({
         json: {
-          paths,
+          paths: paths.map(path => ({ ...path, resume: sessions[path.id], last_studied_at: studiedAt[path.id] })),
           location,
           location_detail: {
             path_title: paths.find((path) => path.id === location.path_id)?.title,
@@ -128,6 +129,7 @@ async function mockLearningWorkspace(page: Page, holdFirstWrite = false) {
       if (holdFirstWrite && writes.length === 1) await firstWrite
       location = 'node_id' in body ? body : sessions[body.path_id!] || body
       sessions[location.path_id!] = location
+      studiedAt[location.path_id!] = new Date().toISOString()
       await route.fulfill({ json: location })
       inFlight--
       return
@@ -175,7 +177,7 @@ test('Back and Forward save the actual node while graph visits preserve it', asy
   await expect(
     page.getByRole('heading', { name: 'Database fundamentals', exact: true }),
   ).toBeVisible()
-  await expect.poll(() => state.writes.at(-1)).toEqual({ path_id: 'databases' })
+  expect(state.writes).toHaveLength(1)
   expect(state.location().node_id).toBe('transactions')
   await page.getByRole('button', { name: 'Outline', exact: true }).click()
   await page.getByRole('button', { name: 'Indexes', exact: true }).click()
@@ -184,7 +186,7 @@ test('Back and Forward save the actual node while graph visits preserve it', asy
   await page.goBack()
   await expect(page.getByRole('heading', { name: 'Indexes', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Outline', exact: true }).click()
-  await expect(page.getByRole('button', { name: 'Indexes Last studied' })).toHaveAttribute(
+  await expect(page.getByRole('button', { name: 'Indexes Current topic' })).toHaveAttribute(
     'aria-current',
     'step',
   )
@@ -208,14 +210,14 @@ test('direct thread links, graph visits and journey switching retain meaningful 
   await expect
     .poll(() => state.location())
     .toEqual({ path_id: 'databases', node_id: 'indexes', thread_id: 'index-details' })
-  await page.getByRole('button', { name: 'My Journeys', exact: true }).click()
-  await expect.poll(() => state.writes.at(-1)).toEqual({ path_id: 'databases' })
-  await page.getByLabel('Choose journey').selectOption('networks')
-  await expect
-    .poll(() => state.location())
-    .toEqual({ path_id: 'networks', node_id: 'routing', thread_id: null })
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('button', { name: 'My Journeys', exact: true }).click()
+  await expect(page).toHaveURL(/\?screen=journeys$/)
+  await page.getByRole('article', { name: 'Computer networks' }).getByRole('button', { name: 'Open journey', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Routing', exact: true })).toBeVisible()
-  await page.getByLabel('Choose journey').selectOption('databases')
+  expect(state.writes).toHaveLength(1)
+  expect(state.location()).toEqual({ path_id: 'databases', node_id: 'indexes', thread_id: 'index-details' })
+  await page.getByRole('navigation', { name: 'Journey breadcrumb' }).getByRole('button', { name: 'My Journeys', exact: true }).click()
+  await page.getByRole('article', { name: 'Database fundamentals' }).getByRole('button', { name: 'Open journey', exact: true }).click()
   await expect.poll(() => state.location().thread_id).toBe('index-details')
   await expect(page.getByRole('heading', { name: 'Indexes', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Home', exact: true }).click()
@@ -231,7 +233,7 @@ test('rapid navigation serializes location writes and saves the newest route las
   const state = await mockLearningWorkspace(page, true)
   await page.goto('/?screen=node&path=databases&node=transactions')
   await expect.poll(() => state.writes.length).toBe(1)
-  await page.getByRole('button', { name: 'My Journeys', exact: true }).click()
+  await page.getByRole('navigation', { name: 'Journey sections' }).getByRole('button', { name: 'Curriculum', exact: true }).click()
   await page.getByRole('button', { name: 'Outline', exact: true }).click()
   await page.getByRole('button', { name: 'Indexes', exact: true }).click()
   await page.getByRole('button', { name: 'Open learning node' }).click()
@@ -271,7 +273,8 @@ test('curriculum shows its original retained evidence and honest legacy assessme
     path: test.info().outputPath('curriculum-source-basis.png'),
     fullPage: true,
   })
-  await page.getByLabel('Choose journey').selectOption('networks')
+  await page.getByRole('navigation', { name: 'Journey breadcrumb' }).getByRole('button', { name: 'My Journeys', exact: true }).click()
+  await page.getByRole('article', { name: 'Computer networks' }).getByRole('button', { name: 'Open journey', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Computer networks', exact: true })).toBeVisible()
   await page.getByText('Original curriculum sources and assessment', { exact: true }).click()
   await expect(page.getByText('Source assessment not recorded for this journey.')).toBeVisible()
@@ -394,17 +397,19 @@ test('reviewing sources from a node attaches new material to that journey', asyn
   })
   await page.goto('/?screen=node&path=databases&node=transactions')
   await page.getByRole('button', { name: 'Review sources', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Your sources', exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Sources for Database fundamentals', exact: true }),
+  ).toBeVisible()
   await expect.poll(() => filters.at(-1)).toBe('databases')
-  await page.getByRole('button', { name: 'Add Source', exact: true }).click()
+  await page.getByRole('button', { name: 'Add source to this journey', exact: true }).click()
   const dialog = page.getByRole('dialog')
   await expect(
-    dialog.getByText('This source will be attached to the current journey.'),
+    dialog.getByText('This source will be attached to Database fundamentals.'),
   ).toBeVisible()
   await dialog.getByRole('button', { name: 'Paste text', exact: true }).click()
   await dialog.getByLabel('Source title').fill('Transaction handbook')
   await dialog.getByLabel('Source text').fill('A transaction is an atomic unit of work.')
-  await dialog.getByRole('button', { name: 'Add Source', exact: true }).click()
+  await dialog.getByRole('button', { name: 'Add source to this journey', exact: true }).click()
   await expect(dialog).toHaveCount(0)
   expect(sourceBody).toEqual({
     title: 'Transaction handbook',
@@ -414,6 +419,6 @@ test('reviewing sources from a node attaches new material to that journey', asyn
   await expect(
     page.getByRole('button', { name: 'Transaction handbook', exact: true }),
   ).toBeVisible()
-  await page.getByRole('button', { name: 'All sources', exact: true }).click()
+  await page.getByRole('button', { name: 'Source Library', exact: true }).click()
   await expect.poll(() => filters.at(-1)).toBeNull()
 })

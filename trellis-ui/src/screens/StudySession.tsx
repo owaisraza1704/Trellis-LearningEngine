@@ -10,7 +10,8 @@ import {
   type StudySet,
   type Workspace,
 } from '../lib/api'
-import { Empty, ErrorNotice, Loading, Modal, Status } from '../components/ui'
+import { Empty, ErrorNotice, Loading, Markdown, Modal, Status } from '../components/ui'
+import GeneralKnowledgeNotice from '../components/GeneralKnowledgeNotice'
 
 export default function StudySession({
   pathId,
@@ -121,27 +122,6 @@ export default function StudySession({
           <Plus size={14} /> New study selection
         </button>
       </div>
-      <div className="mb-6 max-w-md">
-        <label className="field-label" htmlFor="study-journey">
-          Learning journey
-        </label>
-        <select
-          id="study-journey"
-          className="field"
-          value={journey?.id || ''}
-          disabled={update.isPending || exportPdf.isPending}
-          onChange={(event) => onNavigate('session', { path_id: event.target.value })}
-        >
-          <option value="" disabled>
-            Choose a learning journey
-          </option>
-          {workspace.data?.paths.map((path) => (
-            <option key={path.id} value={path.id}>
-              {path.title}
-            </option>
-          ))}
-        </select>
-      </div>
       <ErrorNotice
         error={workspace.error || sets.error || pages.error || update.error || exportPdf.error}
       />
@@ -233,6 +213,9 @@ export default function StudySession({
                           />
                           <div>
                             <p className="text-sm">{item.title}</p>
+                            {item.origin?.status === 'unverified' && (
+                              <GeneralKnowledgeNotice compact />
+                            )}
                             <p className="mt-1 line-clamp-2 text-xs text-[#A8A5A0]">
                               {item.content}
                             </p>
@@ -256,7 +239,10 @@ export default function StudySession({
                     className="flex items-center gap-3 border-t border-[#F0EEE9] py-3"
                   >
                     <span className="font-mono text-xs text-[#A8A5A0]">{index + 1}</span>
-                    <p className="flex-1 text-sm">{item.title}</p>
+                    <div className="flex-1 text-sm">
+                      <p>{item.title}</p>
+                      {item.origin?.status === 'unverified' && <GeneralKnowledgeNotice compact />}
+                    </div>
                     <button
                       aria-label={`Move ${item.title} earlier`}
                       className="icon-button"
@@ -307,6 +293,57 @@ export default function StudySession({
                 )}
               </section>
             </div>
+            {selectedItems.length > 0 && (
+              <section
+                aria-labelledby="reading-preview-title"
+                className="mt-8 rounded-xl border border-[#E3E0D8] bg-white p-5 lg:p-8"
+              >
+                <h2 id="reading-preview-title" className="font-display text-2xl">
+                  Reading preview
+                </h2>
+                <p className="mt-1 text-sm text-[#7A7870]">
+                  Read your selected notes together, in the same order as the PDF.
+                </p>
+                <div className="mt-6 divide-y divide-[#E3E0D8]">
+                  {selectedItems.map((item, index) => (
+                    <article key={item.id} className="py-6 first:pt-0">
+                      <p className="mb-2 text-xs text-[#7A7870]">Note {index + 1}</p>
+                      <h3 className="mb-4 font-display text-xl">{item.title}</h3>
+                      {item.origin?.status === 'unverified' && <GeneralKnowledgeNotice />}
+                      <Markdown>{item.content}</Markdown>
+                      {!!item.evidence?.length && (
+                        <details className="mt-4 text-xs">
+                          <summary className="cursor-pointer text-[#5B7A58]">Saved sources</summary>
+                          {item.evidence.map((evidence, evidenceIndex) => (
+                            <div
+                              key={`${evidence.id}:${evidenceIndex}`}
+                              className="mt-3 rounded-lg bg-[#F7F6F2] p-3"
+                            >
+                              <p className="font-medium">
+                                [{evidenceIndex + 1}] {evidence.title}
+                              </p>
+                              <p className="my-2 whitespace-pre-wrap break-words text-[#7A7870]">
+                                {evidence.excerpt}
+                              </p>
+                              {evidence.url && (
+                                <a
+                                  href={evidence.url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[#4A5FA5] underline"
+                                >
+                                  Open source ↗
+                                </a>
+                              )}
+                            </div>
+                          ))}
+                        </details>
+                      )}
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
           </>
         )
       )}

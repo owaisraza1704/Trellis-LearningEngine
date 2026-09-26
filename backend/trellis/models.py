@@ -82,6 +82,8 @@ class Activity(Record, table=True):
     path_id: str | None = Field(default=None, foreign_key="learningpath.id", index=True)
     node_id: str | None = Field(default=None, foreign_key="node.id")
     thread_id: str | None = Field(default=None, foreign_key="thread.id")
+    interaction_id: str | None = Field(default=None, foreign_key="interaction.id", ondelete="SET NULL")
+    notebook_item_id: str | None = Field(default=None, foreign_key="notebookitem.id", ondelete="SET NULL")
     kind: str
     label: str
 

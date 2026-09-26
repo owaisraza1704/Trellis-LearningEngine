@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import type { Interaction, NotebookPage, StudySet } from '../src/lib/api'
 
 const path = {
@@ -45,6 +45,18 @@ const answer: Interaction = {
   provider: 'fixture',
   model: 'fixture',
   created_at: '2026-09-25T10:00:00Z',
+}
+
+async function openNotebook(page: Page, title: string) {
+  await page
+    .locator('.workspace-sidebar')
+    .getByRole('button', { name: 'Notebooks', exact: true })
+    .click()
+  await page.getByLabel('Search notebooks by journey').fill(title)
+  await page
+    .getByRole('article', { name: title, exact: true })
+    .getByRole('button', { name: 'Open notebook', exact: true })
+    .click()
 }
 
 // These fixtures exercise UI state and API boundaries without generating answers or changing local data.
@@ -296,6 +308,10 @@ test('notebook sections support personal notes, edit, reorder, move and safe del
     return route.fulfill({ status: 404, json: { detail: `Unexpected ${url}` } })
   })
   await page.goto('/?screen=notebook')
+  await page
+    .getByRole('article', { name: path.title, exact: true })
+    .getByRole('button', { name: 'Open notebook', exact: true })
+    .click()
   await page.getByRole('button', { name: 'New section', exact: true }).click()
   await page.getByLabel('Section title', { exact: true }).fill('Physics notes')
   await page.getByRole('button', { name: 'Save section', exact: true }).click()
@@ -416,7 +432,7 @@ test('a pending PDF keeps its selection fixed and later edits do not change the 
     if (url === '/api/exports') return route.fulfill({ json: exports })
     return route.fulfill({ status: 404, json: { detail: `Unexpected ${url}` } })
   })
-  await page.goto('/?screen=session')
+  await page.goto(`/?screen=session&path=${path.id}`)
   await page.getByRole('checkbox', { name: /Second note/ }).click()
   await expect(page.getByRole('checkbox', { name: /Second note/ })).toBeChecked()
   await page.getByRole('button', { name: 'Move Second note earlier', exact: true }).click()
@@ -449,7 +465,13 @@ test('a pending PDF keeps its selection fixed and later edits do not change the 
 test('journey notebooks isolate sections, drafts, study selections and exports without changing study resume', async ({
   page,
 }) => {
-  const python = { ...path, id: 'python-journey', title: 'Python essentials' }
+  const python = {
+    ...path,
+    id: 'python-journey',
+    title: 'Python essentials',
+    last_studied_at: path.updated_at,
+    resume: { path_id: 'python-journey', node_id: 'python-lists', thread_id: null },
+  }
   const hybrid = { ...path, id: 'hybrid-journey', title: 'Hybrid RAG' }
   const pythonNode = { ...node, id: 'python-lists', path_id: python.id, title: 'Lists' }
   const savedLocation = { path_id: python.id, node_id: pythonNode.id, thread_id: null }
@@ -567,7 +589,7 @@ test('journey notebooks isolate sections, drafts, study selections and exports w
   await page.getByRole('button', { name: 'Close dialog', exact: true }).click()
   await page.getByRole('button', { name: 'Edit selected note', exact: true }).click()
   await page.getByLabel('Title', { exact: true }).fill('Unsaved Hybrid draft')
-  await page.getByLabel('Learning journey', { exact: true }).selectOption(python.id)
+  await openNotebook(page, python.title)
   await expect(
     page.getByRole('heading', { name: 'Python essentials notebook', exact: true }),
   ).toBeVisible()
@@ -575,10 +597,8 @@ test('journey notebooks isolate sections, drafts, study selections and exports w
   await expect(
     page.getByRole('heading', { name: 'Python essentials question', exact: true }),
   ).toBeVisible()
-  await page.getByLabel('Learning journey', { exact: true }).selectOption(hybrid.id)
-  await expect(
-    page.getByRole('heading', { name: 'Hybrid RAG question', exact: true }),
-  ).toBeVisible()
+  await openNotebook(page, hybrid.title)
+  await expect(page.getByLabel('Title', { exact: true })).toHaveValue('Unsaved Hybrid draft')
   await expect(
     page
       .getByLabel('Notebook section', { exact: true })
@@ -593,12 +613,20 @@ test('journey notebooks isolate sections, drafts, study selections and exports w
     `${hybrid.id}-study`,
   )
   await expect(page.getByRole('checkbox', { name: /Python essentials question/ })).toHaveCount(0)
-  await page.getByLabel('Learning journey', { exact: true }).selectOption(python.id)
+  await openNotebook(page, python.title)
+  await page
+    .getByRole('navigation', { name: 'Journey sections' })
+    .getByRole('button', { name: 'Study', exact: true })
+    .click()
   await expect(page.getByLabel('Study selection', { exact: true })).toHaveValue(
     `${python.id}-study`,
   )
   await expect(page.getByRole('checkbox', { name: /Hybrid RAG question/ })).toHaveCount(0)
-  await page.getByLabel('Learning journey', { exact: true }).selectOption(hybrid.id)
+  await openNotebook(page, hybrid.title)
+  await page
+    .getByRole('navigation', { name: 'Journey sections' })
+    .getByRole('button', { name: 'Study', exact: true })
+    .click()
   await page.getByRole('button', { name: 'New study selection', exact: true }).click()
   await page.getByLabel('Selection title').fill('Hybrid source review')
   await page.getByRole('button', { name: 'Create selection', exact: true }).click()
@@ -617,7 +645,11 @@ test('journey notebooks isolate sections, drafts, study selections and exports w
     item_ids: [`${hybrid.id}-note`],
     study_session_id: 'new-hybrid-selection',
   })
-  await page.getByLabel('Learning journey', { exact: true }).selectOption(python.id)
+  await openNotebook(page, python.title)
+  await page
+    .getByRole('navigation', { name: 'Journey sections' })
+    .getByRole('button', { name: 'Study', exact: true })
+    .click()
   await expect(page.getByRole('link', { name: 'Download', exact: true })).toHaveCount(0)
   expect(locationWrites).toEqual([])
   await page
@@ -629,7 +661,7 @@ test('journey notebooks isolate sections, drafts, study selections and exports w
   expect(locationWrites.at(-1)).toEqual(savedLocation)
 })
 
-test('an empty workspace offers journey selection without requesting a global notebook', async ({
+test('an empty workspace opens the notebook collection without requesting a global notebook', async ({
   page,
 }) => {
   const requests: string[] = []
@@ -645,12 +677,17 @@ test('an empty workspace offers journey selection without requesting a global no
     })
   })
   await page.goto('/?screen=notebook')
-  await expect(page.getByText('Choose a learning journey', { exact: true }).last()).toBeVisible()
-  await expect(page.getByRole('button', { name: 'New note', exact: true })).toBeDisabled()
-  await page.goto('/?screen=session')
+  await expect(page.getByRole('heading', { name: 'Notebooks', exact: true })).toBeVisible()
   await expect(
-    page.getByText('Study selections and exports belong to that journey’s notebook.'),
+    page.getByText('Your notebooks begin with a journey.', { exact: true }),
   ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'New note', exact: true })).toHaveCount(0)
+  await page.goto('/?screen=session')
+  await expect(page.getByRole('heading', { name: 'Notebooks', exact: true })).toBeVisible()
+  await expect(
+    page.getByRole('button', { name: 'Create your first journey', exact: true }),
+  ).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Export PDF', exact: true })).toHaveCount(0)
   expect(requests.every((url) => url === '/api/workspace')).toBe(true)
 })
 

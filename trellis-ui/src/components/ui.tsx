@@ -3,6 +3,7 @@ import { LoaderCircle, X } from 'lucide-react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import * as Dialog from '@radix-ui/react-dialog'
+import { repairCitationFences, remarkCitations } from '../lib/markdown'
 
 export function ErrorNotice({ error }: { error?: Error | string | null }) {
   if (!error) return null
@@ -65,7 +66,17 @@ export function Modal({
     </Dialog.Root>
   )
 }
-export function Markdown({ children, compact = false }: { children: string; compact?: boolean }) {
+export function Markdown({
+  children,
+  compact = false,
+  citationCount = 0,
+  onCitation,
+}: {
+  children: string
+  compact?: boolean
+  citationCount?: number
+  onCitation?: (number: number) => void
+}) {
   return (
     <div
       className={
@@ -75,10 +86,21 @@ export function Markdown({ children, compact = false }: { children: string; comp
       }
     >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={
+          onCitation ? [remarkGfm, [remarkCitations, { count: citationCount }]] : [remarkGfm]
+        }
         components={{
           a: ({ children, ...props }) =>
-            compact ? (
+            onCitation && props.href?.startsWith('#trellis-citation-') ? (
+              <button
+                type="button"
+                className="text-[#4A5FA5] underline underline-offset-2"
+                aria-label={`View cited passage ${props.href.slice(18)}`}
+                onClick={() => onCitation(Number(props.href!.slice(18)))}
+              >
+                {children}
+              </button>
+            ) : compact ? (
               <span>{children}</span>
             ) : (
               <a {...props} target="_blank" rel="noreferrer">
@@ -88,7 +110,7 @@ export function Markdown({ children, compact = false }: { children: string; comp
           ...(compact ? { img: () => null, input: () => null } : {}),
         }}
       >
-        {children}
+        {repairCitationFences(children)}
       </ReactMarkdown>
     </div>
   )

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { api, type NotebookPage } from '../lib/api'
 import { Plus } from 'lucide-react'
 import { ErrorNotice, Loading, Modal } from './ui'
+import GeneralKnowledgeNotice from './GeneralKnowledgeNotice'
 
 export default function SaveToNotebook({
   payload,
@@ -10,6 +11,7 @@ export default function SaveToNotebook({
   journeyTitle,
   initialPageId,
   scopeLabel,
+  unverified = false,
   onClose,
   onSaved,
 }: {
@@ -25,6 +27,7 @@ export default function SaveToNotebook({
   journeyTitle: string
   initialPageId?: string
   scopeLabel?: string
+  unverified?: boolean
   onClose: () => void
   onSaved: () => void
 }) {
@@ -94,6 +97,7 @@ export default function SaveToNotebook({
               : 'Personal note · choose a section in this journey.'}
           </p>
         </div>
+        {unverified && <GeneralKnowledgeNotice />}
         <fieldset disabled={save.isPending}>
           <label className="field-label" htmlFor="save-title">
             Note title
@@ -184,7 +188,9 @@ export default function SaveToNotebook({
         <ErrorNotice error={pages.error || save.error} />
         {payload.interaction_id && (
           <p className="mt-4 text-xs text-[#7A7870]">
-            The response and its source references are saved with their original context.
+            {unverified
+              ? 'The response keeps its unverified label when saved to your notebook or exported.'
+              : 'The response and its source references are saved with their original context.'}
           </p>
         )}
         <button className="btn mt-5" disabled={!canSave}>

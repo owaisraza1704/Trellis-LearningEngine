@@ -29,6 +29,8 @@ This audit uses the approved synopsis, `tmp/requirements.md`, `tmp/implementatio
 | A response arriving could erase an unsent follow-up question | Clear only the unchanged text of a successful composer submission; preserve newer drafts, failed submissions and text prepared while using quick actions. |
 | Docker ignored a custom Ollama endpoint from `.env` | Honor `OLLAMA_BASE_URL` when supplied and otherwise use the standard Docker-to-laptop address; document container-reachable custom URLs. |
 | Starting another thread promised context it did not include | When creating a thread from within another thread, name the primary topic as its starting context. Selected primary-node responses remain included when starting there. |
+| New journeys mixed old uploads and automatically discovered pages in one list | Start with an empty selection and offer separate add-material and library actions; the library contains eligible user-added material only. |
+| Source origins and removal behavior were unclear | Label uploaded files, added URLs, pasted text and discovered web pages; preview material before choosing it and distinguish deselection from confirmed permanent deletion in Sources. |
 
 ## Functional requirement coverage
 

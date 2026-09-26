@@ -10,7 +10,17 @@ export default function Dashboard({ onNavigate }: { onNavigate: Navigate }) {
   })
   if (isPending) return <Loading />
   if (!data) return <ErrorNotice error={error} />
-  const active = data.paths.find((path) => path.id === data.location?.path_id)
+  const recent = data.paths
+    .filter((path) => path.last_studied_at && path.resume?.node_id)
+    .sort((a, b) => b.last_studied_at!.localeCompare(a.last_studied_at!))
+    .slice(0, 4)
+  const lastStudied = recent[0]
+  const locationDetail =
+    lastStudied?.resume?.path_id === data.location.path_id &&
+    lastStudied?.resume?.node_id === data.location.node_id &&
+    lastStudied?.resume?.thread_id === data.location.thread_id
+      ? data.location_detail
+      : undefined
   return (
     <div className="screen-enter max-w-6xl mx-auto">
       <div className="mb-8">
@@ -35,40 +45,45 @@ export default function Dashboard({ onNavigate }: { onNavigate: Navigate }) {
           </div>
         ))}
       </div>
-      {active && (
+      {lastStudied && (
         <div className="mb-8 rounded-xl border border-[#C5D9C4] bg-[#EFF4EE] p-6">
           <p className="mb-2 text-xs uppercase tracking-widest text-[#5B7A58]">Continue learning</p>
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div>
-              <h2 className="font-display text-2xl">{active.title}</h2>
-              {data.location_detail?.node_title && (
+              <h2 className="font-display text-2xl">{lastStudied.title}</h2>
+              {locationDetail?.node_title && (
                 <p className="mt-2 text-sm text-[#3D3C38]">
-                  Last studied: {data.location_detail.node_title}
-                  {data.location_detail.thread_title && (
+                  Last studied: {locationDetail.node_title}
+                  {locationDetail.thread_title && (
                     <span className="block mt-1 text-[#4A5FA5]">
-                      Exploring: {data.location_detail.thread_title}
+                      Exploring: {locationDetail.thread_title}
                     </span>
                   )}
                 </p>
               )}
               <p className="mt-1 text-sm text-[#7A7870]">
-                {active.completed_count} of {active.node_count} nodes completed
+                {lastStudied.completed_count} of {lastStudied.node_count} topics completed
               </p>
             </div>
-            <button
-              className="btn"
-              onClick={() => onNavigate(data.location.node_id ? 'node' : 'graph', data.location)}
-            >
+            <button className="btn" onClick={() => onNavigate('node', lastStudied.resume!)}>
               Continue <ArrowRight size={15} />
             </button>
           </div>
         </div>
       )}
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="font-display text-xl">Your journeys</h2>
-        <button className="btn-secondary" onClick={() => onNavigate('create')}>
-          <Plus size={15} /> New Journey
-        </button>
+        <h2 className="font-display text-xl">Recently studied</h2>
+        <div className="flex flex-wrap items-center gap-3">
+          <button
+            className="text-sm text-[#5B7A58] hover:underline"
+            onClick={() => onNavigate('journeys')}
+          >
+            View all journeys <ArrowRight size={14} className="inline" />
+          </button>
+          <button className="btn-secondary" onClick={() => onNavigate('create')}>
+            <Plus size={15} /> New Journey
+          </button>
+        </div>
       </div>
       {data.paths.length === 0 ? (
         <Empty title="Begin with something you want to understand.">
@@ -80,13 +95,20 @@ export default function Dashboard({ onNavigate }: { onNavigate: Navigate }) {
             Create your first journey
           </button>
         </Empty>
+      ) : recent.length === 0 ? (
+        <Empty title="Choose a journey to begin studying.">
+          <p className="mb-4">Your recently studied journeys will appear here.</p>
+          <button className="btn" onClick={() => onNavigate('journeys')}>
+            Browse your journeys
+          </button>
+        </Empty>
       ) : (
         <div className="grid gap-4 md:grid-cols-2">
-          {data.paths.map((path) => (
-            <button
+          {recent.map((path) => (
+            <article
               key={path.id}
-              onClick={() => onNavigate('graph', { path_id: path.id })}
-              className="rounded-xl border border-[#E3E0D8] bg-white p-5 text-left transition-all hover:border-[#B8B5AD] hover:shadow-sm"
+              aria-label={path.title}
+              className="rounded-xl border border-[#E3E0D8] bg-white p-5"
             >
               <h3 className="font-display text-xl">{path.title}</h3>
               <p className="my-2 line-clamp-2 text-sm text-[#7A7870]">{path.description}</p>
@@ -98,11 +120,27 @@ export default function Dashboard({ onNavigate }: { onNavigate: Navigate }) {
               </div>
               <div className="flex justify-between text-xs text-[#A8A5A0]">
                 <span>
-                  {path.completed_count}/{path.node_count} nodes · {Math.round(path.progress)}%
+                  {path.completed_count}/{path.node_count} topics · {Math.round(path.progress)}%
                 </span>
-                <span>{date(path.updated_at)}</span>
+                <span>Last studied {date(path.last_studied_at!)}</span>
               </div>
-            </button>
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <button
+                  className="btn-secondary"
+                  onClick={() => onNavigate('graph', { path_id: path.id })}
+                >
+                  Open journey
+                </button>
+                {path.resume?.node_id && (
+                  <button
+                    className="text-sm text-[#5B7A58] hover:underline"
+                    onClick={() => onNavigate('node', path.resume!)}
+                  >
+                    Continue learning <ArrowRight size={14} className="inline" />
+                  </button>
+                )}
+              </div>
+            </article>
           ))}
         </div>
       )}

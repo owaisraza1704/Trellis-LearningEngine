@@ -22,6 +22,8 @@ import {
 } from 'lucide-react'
 import Landing, { TrellisLogo } from './screens/Landing'
 import Dashboard from './screens/Dashboard'
+import JourneyLibrary from './screens/JourneyLibrary'
+import JourneyNavigation from './components/JourneyNavigation'
 import CurriculumGraph from './screens/CurriculumGraph'
 import LearningNode from './screens/LearningNode'
 import CreateJourney from './screens/CreateJourney'
@@ -30,7 +32,7 @@ import History from './screens/History'
 import Settings from './screens/Settings'
 import StudySession from './screens/StudySession'
 import Sources from './screens/Sources'
-import { api, type Location, type Navigate, type Screen, type Workspace } from './lib/api'
+import { api, ApiError, type Location, type Navigate, type Screen, type Workspace } from './lib/api'
 import { ErrorNotice } from './components/ui'
 
 export default function App() {
@@ -38,7 +40,13 @@ export default function App() {
     () =>
       new QueryClient({
         defaultOptions: {
-          queries: { retry: false, refetchOnWindowFocus: false },
+          queries: {
+            retry: (failures, error) =>
+              failures < 1 &&
+              error instanceof ApiError &&
+              [0, 408, 429, 500, 502, 503, 504].includes(error.status),
+            refetchOnWindowFocus: false,
+          },
           mutations: { retry: false },
         },
       }),
@@ -54,7 +62,18 @@ function WorkspaceApp() {
   const router = useRouter()
   const params = useSearchParams()
   const client = useQueryClient()
-  const screen = (params.get('screen') || 'landing') as Screen
+  const requestedScreen = (params.get('screen') || 'landing') as Screen
+  const pathId = ['dashboard', 'journeys', 'notebooks', 'history', 'settings', 'create'].includes(
+    requestedScreen,
+  )
+    ? undefined
+    : params.get('path') || undefined
+  const screen =
+    !pathId && requestedScreen === 'graph'
+      ? 'journeys'
+      : !pathId && ['notebook', 'session'].includes(requestedScreen)
+        ? 'notebooks'
+        : requestedScreen
   const [collapsed, setCollapsed] = useState(false)
   const [locationError, setLocationError] = useState<Error | null>(null)
   const locationRevision = useRef(0)
@@ -62,7 +81,6 @@ function WorkspaceApp() {
     queryKey: ['workspace'],
     queryFn: () => api<Workspace>('/workspace'),
   })
-  const pathId = params.get('path') || workspace.data?.location?.path_id || undefined
   const nodeId = params.get('node') || undefined
   const threadId = params.get('thread') || undefined
   const currentPath = workspace.data?.paths.find((path) => path.id === pathId)
@@ -86,30 +104,29 @@ function WorkspaceApp() {
     },
   })
   useEffect(() => {
-    if (!pathId || !['graph', 'node'].includes(screen) || (screen === 'node' && !nodeId)) return
-    const location: Location =
-      screen === 'node'
-        ? { path_id: pathId, node_id: nodeId, thread_id: threadId || null }
-        : { path_id: pathId }
+    if (screen !== 'node' || !pathId || !nodeId) return
+    const location: Location = { path_id: pathId, node_id: nodeId, thread_id: threadId || null }
     setLocationError(null)
     persistLocation({ location, revision: ++locationRevision.current })
   }, [screen, pathId, nodeId, threadId, persistLocation])
 
   const navigate: Navigate = (next, location) => {
     const query = new URLSearchParams({ screen: next })
-    const nextPath = location?.path_id === null ? undefined : location?.path_id || pathId
+    const nextPath = location?.path_id
     if (nextPath) query.set('path', nextPath)
     if (location?.node_id) query.set('node', location.node_id)
     if (location?.thread_id) query.set('thread', location.thread_id)
+    if (location?.interaction_id) query.set('interaction', location.interaction_id)
+    if (location?.notebook_item_id) query.set('note', location.notebook_item_id)
     router.push(`/?${query}`)
   }
   if (screen === 'landing') return <Landing onEnter={() => navigate('dashboard')} />
 
   const nav = [
     { screen: 'dashboard', label: 'Home', Icon: House },
-    { screen: 'graph', label: 'My Journeys', Icon: Network },
-    { screen: 'notebook', label: 'Notebook', Icon: BookOpen },
-    { screen: 'sources', label: 'Sources', Icon: Files },
+    { screen: 'journeys', label: 'My Journeys', Icon: Network },
+    { screen: 'notebooks', label: 'Notebooks', Icon: BookOpen },
+    { screen: 'sources', label: 'Source Library', Icon: Files },
     { screen: 'create', label: 'New Journey', Icon: Plus },
   ] as const
   return (
@@ -142,14 +159,14 @@ function WorkspaceApp() {
               </span>
             )}
           </button>
-          <nav className="flex-1 space-y-1">
+          <nav aria-label="Main navigation" className="flex-1 space-y-1">
             {nav.map(({ screen: target, label, Icon }) => (
               <button
                 key={target}
                 title={label}
                 onClick={() => navigate(target)}
                 className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm transition-all ${
-                  screen === target
+                  (screen === target && !currentPath) || (target === 'journeys' && !!currentPath)
                     ? 'border border-[#E3E0D8] bg-white text-[#1A1916] shadow-sm'
                     : 'border border-transparent text-[#7A7870] hover:bg-[#EAE8E3]'
                 }`}
@@ -158,25 +175,6 @@ function WorkspaceApp() {
                 {!collapsed && <span className="sidebar-label">{label}</span>}
               </button>
             ))}
-            {!collapsed && currentPath && (
-              <div className="sidebar-label mt-5 border-t border-[#E3E0D8] pt-4">
-                <p className="px-3 text-[10px] uppercase tracking-widest text-[#A8A5A0]">
-                  Active Journey
-                </p>
-                <button
-                  className="mt-2 w-full rounded-lg p-3 text-left hover:bg-[#EAE8E3]"
-                  onClick={() => navigate('graph', { path_id: currentPath.id })}
-                >
-                  <p className="flex items-center gap-2 text-xs font-medium">
-                    <span className="h-2 w-2 flex-shrink-0 rounded-full bg-[#5B7A58]" />
-                    {currentPath.title}
-                  </p>
-                  <p className="mt-1 text-xs text-[#A8A5A0]">
-                    {Math.round(currentPath.progress)}% complete
-                  </p>
-                </button>
-              </div>
-            )}
           </nav>
           <div className="space-y-1 border-t border-[#E3E0D8] pt-3">
             {[
@@ -203,22 +201,49 @@ function WorkspaceApp() {
           </div>
         </div>
       </aside>
-      <main className={`min-w-0 flex-1 overflow-y-auto ${screen === 'node' ? '' : 'p-5 lg:p-8'}`}>
-        <ErrorNotice error={locationError} />
-        {screen === 'dashboard' && <Dashboard onNavigate={navigate} />}
-        {screen === 'graph' && <CurriculumGraph onNavigate={navigate} pathId={pathId} />}
-        {screen === 'node' && (
-          <LearningNode onNavigate={navigate} nodeId={nodeId} threadId={threadId} />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {currentPath && ['graph', 'node', 'notebook', 'sources', 'session'].includes(screen) && (
+          <JourneyNavigation journey={currentPath} screen={screen} onNavigate={navigate} />
         )}
-        {screen === 'create' && <CreateJourney onNavigate={navigate} />}
-        {screen === 'notebook' && <Notebook key={pathId} pathId={pathId} onNavigate={navigate} />}
-        {screen === 'history' && <History onNavigate={navigate} />}
-        {screen === 'settings' && <Settings />}
-        {screen === 'session' && (
-          <StudySession key={pathId} pathId={pathId} onNavigate={navigate} />
-        )}
-        {screen === 'sources' && <Sources key={pathId} pathId={pathId} />}
-      </main>
+        <main
+          className={`min-h-0 min-w-0 flex-1 overflow-y-auto ${screen === 'node' ? '' : 'p-5 lg:p-8'}`}
+        >
+          <ErrorNotice error={locationError} />
+          {screen === 'dashboard' && <Dashboard onNavigate={navigate} />}
+          {screen === 'journeys' && (
+            <JourneyLibrary key="journeys" mode="journeys" onNavigate={navigate} />
+          )}
+          {screen === 'notebooks' && (
+            <JourneyLibrary key="notebooks" mode="notebooks" onNavigate={navigate} />
+          )}
+          {screen === 'graph' && (
+            <CurriculumGraph key={pathId} onNavigate={navigate} pathId={pathId} />
+          )}
+          {screen === 'node' && (
+            <LearningNode
+              onNavigate={navigate}
+              nodeId={nodeId}
+              threadId={threadId}
+              interactionId={params.get('interaction') || undefined}
+            />
+          )}
+          {screen === 'create' && <CreateJourney onNavigate={navigate} />}
+          {screen === 'notebook' && (
+            <Notebook
+              key={pathId}
+              pathId={pathId}
+              onNavigate={navigate}
+              itemId={params.get('note') || undefined}
+            />
+          )}
+          {screen === 'history' && <History onNavigate={navigate} />}
+          {screen === 'settings' && <Settings />}
+          {screen === 'session' && (
+            <StudySession key={pathId} pathId={pathId} onNavigate={navigate} />
+          )}
+          {screen === 'sources' && <Sources key={pathId} pathId={pathId} />}
+        </main>
+      </div>
     </div>
   )
 }

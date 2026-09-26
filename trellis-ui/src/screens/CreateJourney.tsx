@@ -1,8 +1,10 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowRight, Plus } from 'lucide-react'
+import { ArrowRight, BookOpen, Eye, Plus, X } from 'lucide-react'
 import { api, type Navigate, type PathDetail, type Source } from '../lib/api'
-import { ErrorNotice, Modal, Status } from '../components/ui'
+import { sourceOriginLabel } from '../lib/source'
+import { ErrorNotice, Loading, Modal, Status } from '../components/ui'
+import { SourcePreview } from '../components/SourcePreview'
 import { SourceForm } from './Sources'
 
 export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) {
@@ -11,6 +13,8 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
   const [mode, setMode] = useState<'goal' | 'outline'>('goal')
   const [chosen, setChosen] = useState<string[]>([])
   const [adding, setAdding] = useState(false)
+  const [librarySelection, setLibrarySelection] = useState<string[] | null>(null)
+  const [preview, setPreview] = useState<string | null>(null)
   const sources = useQuery({
     queryKey: ['sources'],
     queryFn: () => api<Source[]>('/sources'),
@@ -30,9 +34,12 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
       onNavigate('graph', { path_id: data.id })
     },
   })
-  const available = sources.data?.filter((source) => !source.path_id) || []
+  const available = sources.data?.filter((source) => !source.path_id && source.kind !== 'web') || []
   const processing = chosen.some(
-    (id) => !available.some((source) => source.id === id && source.status === 'ready'),
+    (id) =>
+      !available.some(
+        (source) => source.id === id && source.status === 'ready' && !source.needs_reindex,
+      ),
   )
   return (
     <div className="screen-enter mx-auto max-w-2xl py-8">
@@ -48,12 +55,13 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
       <form
         onSubmit={(event) => {
           event.preventDefault()
-          create.mutate()
+          if (!create.isPending && !processing) create.mutate()
         }}
       >
         <div className="mb-4 flex justify-center gap-2">
           <button
             type="button"
+            disabled={create.isPending}
             className={mode === 'goal' ? 'btn' : 'btn-secondary'}
             onClick={() => setMode('goal')}
           >
@@ -61,6 +69,7 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
           </button>
           <button
             type="button"
+            disabled={create.isPending}
             className={mode === 'outline' ? 'btn' : 'btn-secondary'}
             onClick={() => setMode('outline')}
           >
@@ -73,6 +82,7 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
         <textarea
           id="journey-input"
           required
+          disabled={create.isPending}
           className="field min-h-40"
           placeholder={
             mode === 'goal'
@@ -83,46 +93,112 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
           onChange={(event) => setInput(event.target.value)}
         />
         <div className="mt-6 rounded-xl border border-[#E3E0D8] bg-white p-5">
-          <div className="mb-2 flex items-center justify-between">
+          <div className="mb-2 flex items-center justify-between gap-3">
             <h2 className="font-display text-lg">Learning material</h2>
-            <button type="button" className="btn-secondary" onClick={() => setAdding(true)}>
-              <Plus size={14} /> Add Source
-            </button>
+            {chosen.length > 0 && (
+              <span className="text-xs text-[#7A7870]">
+                {chosen.length} {chosen.length === 1 ? 'source' : 'sources'} selected
+              </span>
+            )}
           </div>
           <p className="mb-4 text-xs text-[#7A7870]">
-            Selected material takes priority. With no sources selected, Trellis looks for web
-            evidence.
+            Selected material takes priority. Trellis searches the web when more evidence is needed
+            and saves useful sources with this journey as your questions grow.
           </p>
-          {available.length === 0 && (
-            <p className="text-sm text-[#A8A5A0]">No unattached sources yet.</p>
-          )}
-          {available.map((source) => (
-            <label
-              key={source.id}
-              className="flex items-center gap-3 border-t border-[#F0EEE9] py-3 text-sm"
+          <div className="mb-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={create.isPending}
+              onClick={() => setAdding(true)}
             >
-              <input
-                type="checkbox"
-                checked={chosen.includes(source.id)}
-                onChange={() =>
-                  setChosen((ids) =>
-                    ids.includes(source.id)
-                      ? ids.filter((id) => id !== source.id)
-                      : [...ids, source.id],
-                  )
-                }
-              />
-              <span className="flex-1">{source.title}</span>
-              <Status value={source.status} />
-            </label>
-          ))}
+              <Plus size={14} /> Add files or URLs
+            </button>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={create.isPending}
+              onClick={() => setLibrarySelection([...chosen])}
+            >
+              <BookOpen size={14} /> Choose from source library
+            </button>
+          </div>
+          {chosen.length === 0 && (
+            <div className="rounded-lg border border-dashed border-[#E3E0D8] p-5 text-center">
+              <p className="text-sm text-[#5A5850]">No material selected</p>
+              <p className="mt-1 text-xs text-[#7A7870]">
+                Add your own material or choose saved sources for this journey.
+              </p>
+            </div>
+          )}
+          {chosen.map((id) => {
+            const source = sources.data?.find((item) => item.id === id)
+            const title = source?.title || 'Unavailable source'
+            return (
+              <article key={id} className="border-t border-[#F0EEE9] py-3 text-sm">
+                <div className="flex flex-wrap items-start gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="break-words font-medium">{title}</p>
+                    {source && (
+                      <p className="mt-1 text-xs text-[#7A7870]">
+                        {sourceOriginLabel(source.kind)}
+                      </p>
+                    )}
+                  </div>
+                  {source && <Status value={source.status} />}
+                  <div className="flex gap-2">
+                    {source && (
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Preview ${title}`}
+                        title="Preview source"
+                        disabled={create.isPending}
+                        onClick={() => setPreview(id)}
+                      >
+                        <Eye size={16} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="icon-button"
+                      aria-label={`Remove ${title} from selection`}
+                      title="Remove from selection"
+                      disabled={create.isPending}
+                      onClick={() => setChosen((ids) => ids.filter((item) => item !== id))}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+                <ErrorNotice error={source?.error} />
+                {source?.needs_reindex && (
+                  <p className="mt-2 text-xs text-[#946B32]">
+                    Open the preview to reindex this source before using it.
+                  </p>
+                )}
+                {!available.some((item) => item.id === id) && !sources.isPending && (
+                  <p className="mt-2 text-xs text-[#946B32]">
+                    This source is no longer available for a new journey. Remove it from this
+                    selection.
+                  </p>
+                )}
+              </article>
+            )
+          })}
+          {chosen.length > 0 && (
+            <p className="mt-3 text-xs text-[#7A7870]">
+              Removing a selection keeps the source in your library. Permanently delete sources from
+              Sources in the sidebar.
+            </p>
+          )}
           <ErrorNotice error={sources.error} />
         </div>
         <ErrorNotice error={create.error} />
         {processing && (
           <p role="status" className="mt-3 text-xs text-[#7A7870]">
-            All selected sources must finish processing before building the path. Remove failed
-            sources or retry them in Sources.
+            All selected sources must be ready before building the path. Open a preview to retry or
+            reindex, or remove the source from this selection.
           </p>
         )}
         <button
@@ -142,12 +218,85 @@ export default function CreateJourney({ onNavigate }: { onNavigate: Navigate }) 
         <Modal title="Add learning material" onClose={() => setAdding(false)}>
           <SourceForm
             onDone={(source) => {
+              client.setQueryData<Source[]>(['sources'], (current = []) => [
+                source,
+                ...current.filter((item) => item.id !== source.id),
+              ])
               setChosen((ids) => [...ids, source.id])
               setAdding(false)
             }}
           />
         </Modal>
       )}
+      {librarySelection !== null && (
+        <Modal title="Choose from source library" onClose={() => setLibrarySelection(null)}>
+          <p className="mb-4 text-sm text-[#7A7870]">
+            Your uploaded files, added URLs and pasted text that are not yet attached to a journey.
+            Automatically discovered web pages stay with your learning evidence.
+          </p>
+          <ErrorNotice error={sources.error} />
+          {sources.isPending && <Loading label="Loading your source library…" />}
+          {!sources.isPending && available.length === 0 && (
+            <p className="py-4 text-sm text-[#7A7870]">
+              No saved material is available for a new journey. Close this library and add files or
+              URLs to get started.
+            </p>
+          )}
+          {available.map((source) => (
+            <div key={source.id} className="flex items-start gap-3 border-t border-[#F0EEE9] py-3">
+              <label className="flex min-w-0 flex-1 items-start gap-3 text-sm">
+                <input
+                  type="checkbox"
+                  className="mt-1"
+                  aria-label={source.title}
+                  checked={librarySelection.includes(source.id)}
+                  onChange={() =>
+                    setLibrarySelection((ids) =>
+                      ids?.includes(source.id)
+                        ? ids.filter((id) => id !== source.id)
+                        : [...(ids || []), source.id],
+                    )
+                  }
+                />
+                <span className="min-w-0">
+                  <span className="block break-words">{source.title}</span>
+                  <span className="mt-1 block text-xs text-[#7A7870]">
+                    {sourceOriginLabel(source.kind)}
+                  </span>
+                </span>
+              </label>
+              <Status value={source.status} />
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={`Preview ${source.title}`}
+                title="Preview source"
+                onClick={() => setPreview(source.id)}
+              >
+                <Eye size={16} />
+              </button>
+            </div>
+          ))}
+          <div className="mt-5 flex flex-wrap justify-end gap-2">
+            <button className="btn-secondary" onClick={() => setLibrarySelection(null)}>
+              Cancel
+            </button>
+            <button
+              className="btn"
+              disabled={sources.isPending || !!sources.error}
+              onClick={() => {
+                setChosen(
+                  librarySelection.filter((id) => available.some((source) => source.id === id)),
+                )
+                setLibrarySelection(null)
+              }}
+            >
+              Use selected sources
+            </button>
+          </div>
+        </Modal>
+      )}
+      {preview && <SourcePreview sourceId={preview} onClose={() => setPreview(null)} />}
     </div>
   )
 }

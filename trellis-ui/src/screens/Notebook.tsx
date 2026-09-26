@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowDown, ArrowUp, Download, FileText, Pencil, Plus, Search, Trash2 } from 'lucide-react'
@@ -12,25 +12,45 @@ import {
 } from '../lib/api'
 import { Empty, ErrorNotice, Loading, Markdown, Modal } from '../components/ui'
 import SaveToNotebook from '../components/SaveToNotebook'
+import GeneralKnowledgeNotice from '../components/GeneralKnowledgeNotice'
 
 export default function Notebook({
   pathId,
+  itemId,
   onNavigate,
 }: {
   pathId?: string
+  itemId?: string
   onNavigate: Navigate
 }) {
   const client = useQueryClient()
   const [pageId, setPageId] = useState('all')
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(itemId || null)
   const [search, setSearch] = useState('')
   const [newNote, setNewNote] = useState(false)
   const [noteSaved, setNoteSaved] = useState(false)
   const [pageEditor, setPageEditor] = useState<NotebookPage | 'new' | null>(null)
   const [pageTitle, setPageTitle] = useState('')
-  const [editing, setEditing] = useState(false)
-  const [title, setTitle] = useState('')
-  const [content, setContent] = useState('')
+  const [drafts, setDrafts] = useState<Record<string, { title: string; content: string }>>({})
+  const draftKey = `trellis:notebook-drafts:${pathId}`
+  useEffect(() => {
+    const saved = sessionStorage.getItem(draftKey)
+    if (saved) setDrafts(JSON.parse(saved))
+  }, [draftKey])
+  useEffect(() => {
+    if (!itemId) return
+    setPageId('all')
+    setSearch('')
+    setSelectedId(itemId)
+  }, [itemId])
+  function updateDraft(id: string, draft: { title: string; content: string } | null) {
+    const next = JSON.parse(sessionStorage.getItem(draftKey) || '{}')
+    if (draft) next[id] = draft
+    else delete next[id]
+    // Write during the edit, so navigation or reload cannot outrun a saving effect.
+    sessionStorage.setItem(draftKey, JSON.stringify(next))
+    setDrafts(next)
+  }
   const workspace = useQuery({
     queryKey: ['workspace'],
     queryFn: () => api<Workspace>('/workspace'),
@@ -56,7 +76,19 @@ export default function Notebook({
       }
       if (variables.method === 'DELETE' && variables.path === `/notebook/pages/${pageId}`)
         setPageId('all')
-      setEditing(false)
+      if (variables.path.startsWith('/notebook/items/')) {
+        const id = variables.path.split('/').at(-1)!
+        const body = variables.body as { title?: string; content?: string } | undefined
+        const latestDraft = JSON.parse(sessionStorage.getItem(draftKey) || '{}')[id]
+        // A save may finish after returning to this note and making a newer edit.
+        if (
+          variables.method === 'DELETE' ||
+          (body?.content !== undefined &&
+            latestDraft?.title.trim() === body.title &&
+            latestDraft?.content.trim() === body.content)
+        )
+          updateDraft(id, null)
+      }
       setPageEditor(null)
     },
   })
@@ -67,7 +99,9 @@ export default function Notebook({
       `${item.title} ${item.content}`.toLowerCase().includes(search.toLowerCase()),
   )
   const selected = items.find((item) => item.id === selectedId) || items[0]
+  const draft = selected && drafts[selected.id]
   const selectedPage = pages.data?.find((page) => page.id === selected?.page_id)
+  const originNodeId = selected?.node_id || (selected?.origin?.node_id as string | undefined)
   function reorder(item: NotebookItem, delta: number) {
     const page = pages.data!.find((candidate) => candidate.id === item.page_id)!
     const ids = page.items.map((candidate) => candidate.id)
@@ -112,31 +146,12 @@ export default function Notebook({
           </button>
         </div>
       </div>
-      <div className="mb-6 max-w-md">
-        <label className="field-label" htmlFor="notebook-journey">
-          Learning journey
-        </label>
-        <select
-          id="notebook-journey"
-          className="field"
-          value={journey?.id || ''}
-          disabled={workspace.isPending}
-          onChange={(event) => onNavigate('notebook', { path_id: event.target.value })}
-        >
-          <option value="" disabled>
-            Choose a learning journey
-          </option>
-          {workspace.data?.paths.map((path) => (
-            <option key={path.id} value={path.id}>
-              {path.title}
-            </option>
-          ))}
-        </select>
-        <p className="mt-2 text-xs text-[#7A7870]">
-          Each journey has its own notebook. Your study resume position stays the same.
-        </p>
-      </div>
       <ErrorNotice error={workspace.error || pages.error || action.error} />
+      {itemId && pages.isSuccess && !all.some((item) => item.id === itemId) && (
+        <p role="status" className="mb-4 rounded-lg bg-[#F2F0EC] p-3 text-sm text-[#7A7870]">
+          The linked note is no longer available in this notebook. Choose another note below.
+        </p>
+      )}
       {noteSaved && (
         <p role="status" className="mb-4 rounded-lg bg-[#EFF4EE] p-3 text-sm text-[#5B7A58]">
           Note saved to Notebook
@@ -160,7 +175,6 @@ export default function Notebook({
               onClick={() => {
                 action.reset()
                 setPageId('all')
-                setEditing(false)
               }}
             >
               All notes <span className="float-right text-xs opacity-60">{all.length}</span>
@@ -174,7 +188,6 @@ export default function Notebook({
                   onClick={() => {
                     action.reset()
                     setPageId(page.id)
-                    setEditing(false)
                   }}
                 >
                   <span className="block truncate">{page.title}</span>
@@ -214,7 +227,6 @@ export default function Notebook({
                 onChange={(event) => {
                   action.reset()
                   setSearch(event.target.value)
-                  setEditing(false)
                 }}
               />
             </div>
@@ -234,11 +246,12 @@ export default function Notebook({
                   }`}
                   onClick={() => {
                     setSelectedId(item.id)
-                    setEditing(false)
                   }}
                 >
                   <p className="text-sm font-medium">{item.title}</p>
-                  <div className="mt-2 text-[#7A7870]">
+                  {item.origin?.status === 'unverified' && <GeneralKnowledgeNotice compact />}
+                  {drafts[item.id] && <p className="mt-1 text-xs text-[#5B7A58]">Unsaved draft</p>}
+                  <div className="mt-2 max-h-24 overflow-hidden text-[#7A7870]">
                     <Markdown compact>{item.content}</Markdown>
                   </div>
                   <p className="mt-2 text-[10px] text-[#A8A5A0]">
@@ -272,11 +285,10 @@ export default function Notebook({
                   <button
                     aria-label="Edit selected note"
                     className="icon-button"
+                    disabled={action.isPending || !!draft}
                     onClick={() => {
                       action.reset()
-                      setTitle(selected.title)
-                      setContent(selected.content)
-                      setEditing(true)
+                      updateDraft(selected.id, { title: selected.title, content: selected.content })
                     }}
                   >
                     <Pencil size={14} />
@@ -297,18 +309,23 @@ export default function Notebook({
                   </button>
                 </div>
               </div>
-              {editing ? (
+              {selected.origin?.status === 'unverified' && <GeneralKnowledgeNotice />}
+              {draft ? (
                 <form
                   onSubmit={(event) => {
                     event.preventDefault()
-                    if (!title.trim() || !content.trim()) return
+                    if (!draft.title.trim() || !draft.content.trim()) return
                     action.mutate({
                       path: `/notebook/items/${selected.id}`,
                       method: 'PATCH',
-                      body: { title: title.trim(), content: content.trim() },
+                      body: { title: draft.title.trim(), content: draft.content.trim() },
                     })
                   }}
                 >
+                  <p role="status" className="mb-4 text-xs text-[#5B7A58]">
+                    Unsaved draft kept in this tab, including after reload. Save to update your
+                    notebook.
+                  </p>
                   <label htmlFor="edit-note-title" className="field-label">
                     Title
                   </label>
@@ -318,8 +335,10 @@ export default function Notebook({
                     maxLength={200}
                     className="field"
                     required
-                    value={title}
-                    onChange={(event) => setTitle(event.target.value)}
+                    value={draft.title}
+                    onChange={(event) =>
+                      updateDraft(selected.id, { ...draft, title: event.target.value })
+                    }
                   />
                   <label htmlFor="edit-note-content" className="field-label">
                     Content · Markdown supported
@@ -329,25 +348,28 @@ export default function Notebook({
                     disabled={action.isPending}
                     className="field min-h-64 font-mono !text-xs"
                     required
-                    value={content}
-                    onChange={(event) => setContent(event.target.value)}
+                    value={draft.content}
+                    onChange={(event) =>
+                      updateDraft(selected.id, { ...draft, content: event.target.value })
+                    }
                   />
                   <div className="mt-4 flex gap-2">
                     <button
                       className="btn"
-                      disabled={action.isPending || !title.trim() || !content.trim()}
+                      disabled={action.isPending || !draft.title.trim() || !draft.content.trim()}
                     >
                       Save note
                     </button>
                     <button
                       className="btn-secondary"
                       type="button"
+                      disabled={action.isPending}
                       onClick={() => {
-                        setEditing(false)
+                        updateDraft(selected.id, null)
                         action.reset()
                       }}
                     >
-                      Cancel
+                      Discard draft
                     </button>
                   </div>
                 </form>
@@ -381,6 +403,23 @@ export default function Notebook({
                   ))}
                 </select>
               </div>
+              {originNodeId && (
+                <button
+                  className="mt-5 text-sm text-[#5B7A58] underline"
+                  onClick={() =>
+                    onNavigate('node', {
+                      path_id: (selected.origin?.path_id as string | undefined) || pathId,
+                      node_id: originNodeId,
+                      thread_id:
+                        selected.thread_id || (selected.origin?.thread_id as string | undefined),
+                      interaction_id: selected.origin?.interaction_id as string | undefined,
+                    })
+                  }
+                >
+                  Return to original{' '}
+                  {selected.origin?.interaction_id ? 'response' : 'learning context'}
+                </button>
+              )}
               {selected.origin && Object.keys(selected.origin).length > 0 && (
                 <details className="mt-5">
                   <summary className="cursor-pointer text-xs text-[#7A7870]">

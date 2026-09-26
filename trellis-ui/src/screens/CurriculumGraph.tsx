@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Background, Controls, ReactFlow } from '@xyflow/react'
+import { Background, Controls, MarkerType, Position, ReactFlow } from '@xyflow/react'
 import dagre from '@dagrejs/dagre'
 import { ArrowDown, ArrowUp, ArrowRight, List, Network, Pencil, Plus, Trash2 } from 'lucide-react'
 import '@xyflow/react/dist/style.css'
@@ -10,7 +10,6 @@ import {
   type LearningNode,
   type Navigate,
   type PathDetail,
-  type PathSummary,
   type Workspace,
 } from '../lib/api'
 import { Empty, ErrorNotice, Loading, Modal, Status } from '../components/ui'
@@ -115,10 +114,6 @@ export default function CurriculumGraph({
   const [editingPath, setEditingPath] = useState(false)
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const paths = useQuery({
-    queryKey: ['paths'],
-    queryFn: () => api<PathSummary[]>('/paths'),
-  })
   const workspace = useQuery({
     queryKey: ['workspace'],
     queryFn: () => api<Workspace>('/workspace'),
@@ -137,8 +132,10 @@ export default function CurriculumGraph({
     },
   })
   const nodes = path.data?.nodes || []
+  const savedResume = workspace.data?.paths.find((item) => item.id === pathId)?.resume
   const activeNodeId =
-    workspace.data?.location.path_id === pathId ? workspace.data?.location.node_id : null
+    savedResume?.node_id ||
+    (workspace.data?.location.path_id === pathId ? workspace.data?.location.node_id : null)
   const selected =
     nodes.find((node) => node.id === selectedId) ||
     nodes.find((node) => node.id === activeNodeId) ||
@@ -147,35 +144,55 @@ export default function CurriculumGraph({
   const assessment = generation?.evaluation || {}
   const nodeSources =
     generation?.evidence.filter((source) => selected?.evidence_ids?.includes(source.id)) || []
+  const isSequence = nodes.length > 1 && nodes.every((node) => !node.parent_id)
   const graph = useMemo(() => {
     const layout = new dagre.graphlib.Graph()
       .setGraph({ rankdir: 'TB', nodesep: 40, ranksep: 75 })
       .setDefaultEdgeLabel(() => ({}))
-    nodes.forEach((node) => layout.setNode(node.id, { width: 170, height: 70 }))
+    nodes.forEach((node) => layout.setNode(node.id, { width: 230, height: 120 }))
     nodes.forEach((node) => {
       if (node.parent_id) layout.setEdge(node.parent_id, node.id)
     })
-    dagre.layout(layout)
+    if (!isSequence) dagre.layout(layout)
     return {
-      nodes: nodes.map((node) => {
-        const point = layout.node(node.id)
+      nodes: nodes.map((node, index) => {
+        const row = Math.floor(index / 2)
+        const column = row % 2 === 0 ? index % 2 : 1 - (index % 2)
+        const point = isSequence
+          ? { x: column * 300 + 115, y: row * 180 + 60 }
+          : layout.node(node.id)
         return {
           id: node.id,
-          position: { x: point.x - 85, y: point.y - 35 },
+          position: { x: point.x - 115, y: point.y - 60 },
+          sourcePosition:
+            isSequence && index % 2 === 0
+              ? column === 0
+                ? Position.Right
+                : Position.Left
+              : Position.Bottom,
+          targetPosition:
+            isSequence && index % 2 === 1
+              ? column === 0
+                ? Position.Right
+                : Position.Left
+              : Position.Top,
           data: {
             label: (
               <div className="text-center">
-                <p className="text-xs font-medium">{node.title}</p>
-                <p className="mt-1 text-[10px] opacity-70">{node.status.replaceAll('_', ' ')}</p>
+                {isSequence && <p className="mb-1 text-[11px] opacity-70">Step {index + 1}</p>}
+                <p className="text-sm font-medium">{node.title}</p>
+                <p className="mt-1 text-xs opacity-70">{node.status.replaceAll('_', ' ')}</p>
                 {node.id === activeNodeId && (
-                  <p className="mt-1 text-[10px] font-medium">Last studied</p>
+                  <p className="mt-1 text-xs font-medium">
+                    {node.status === 'not_started' ? 'Current topic' : 'Last studied'}
+                  </p>
                 )}
               </div>
             ),
           },
           style: {
-            width: 170,
-            minHeight: 70,
+            width: 230,
+            minHeight: 120,
             borderRadius: 12,
             border: `1.5px solid ${
               selected?.id === node.id
@@ -189,16 +206,27 @@ export default function CurriculumGraph({
           },
         }
       }),
-      edges: nodes
-        .filter((node) => node.parent_id)
-        .map((node) => ({
-          id: `${node.parent_id}-${node.id}`,
-          source: node.parent_id!,
-          target: node.id,
-          style: { stroke: '#B8C8B6', strokeWidth: 1.5 },
-        })),
+      edges: isSequence
+        ? nodes.slice(1).map((node, index) => ({
+            id: `sequence-${nodes[index].id}-${node.id}`,
+            source: nodes[index].id,
+            target: node.id,
+            type: 'smoothstep',
+            ariaLabel: `Learning sequence: ${nodes[index].title} to ${node.title}`,
+            markerEnd: { type: MarkerType.ArrowClosed, color: '#7B87AF' },
+            style: { stroke: '#7B87AF', strokeWidth: 1.5, strokeDasharray: '6 4' },
+          }))
+        : nodes
+            .filter((node) => node.parent_id)
+            .map((node) => ({
+              id: `${node.parent_id}-${node.id}`,
+              source: node.parent_id!,
+              target: node.id,
+              ariaLabel: `Topic hierarchy: ${nodes.find((parent) => parent.id === node.parent_id)?.title} to ${node.title}`,
+              style: { stroke: '#B8C8B6', strokeWidth: 1.5 },
+            })),
     }
-  }, [nodes, selected?.id, activeNodeId])
+  }, [nodes, selected?.id, activeNodeId, isSequence])
   function reorder(index: number, delta: number) {
     const ordered = nodes.map((node) => node.id)
     ;[ordered[index], ordered[index + delta]] = [ordered[index + delta], ordered[index]]
@@ -210,34 +238,11 @@ export default function CurriculumGraph({
   }
   if (!pathId)
     return (
-      <div className="max-w-4xl">
-        <h1 className="font-display text-3xl mb-6">My Journeys</h1>
-        <ErrorNotice error={paths.error} />
-        {paths.isPending ? (
-          <Loading />
-        ) : paths.data?.length ? (
-          <div className="grid gap-4">
-            {paths.data.map((item) => (
-              <button
-                key={item.id}
-                onClick={() => onNavigate('graph', { path_id: item.id })}
-                className="rounded-xl border border-[#E3E0D8] bg-white p-5 text-left"
-              >
-                <h2 className="font-display text-xl">{item.title}</h2>
-                <p className="text-sm text-[#7A7870]">
-                  {item.node_count} nodes · {Math.round(item.progress)}% completed
-                </p>
-              </button>
-            ))}
-          </div>
-        ) : (
-          <Empty title="No journeys yet">
-            <button className="btn mt-2" onClick={() => onNavigate('create')}>
-              Create a journey
-            </button>
-          </Empty>
-        )}
-      </div>
+      <Empty title="Choose a journey">
+        <button className="btn mt-3" onClick={() => onNavigate('journeys')}>
+          Browse My Journeys
+        </button>
+      </Empty>
     )
   if (path.isPending) return <Loading />
   if (!path.data) return <ErrorNotice error={path.error} />
@@ -245,21 +250,6 @@ export default function CurriculumGraph({
     <div className="screen-enter flex min-h-[calc(100vh-4rem)] flex-col">
       <div className="mb-5 flex flex-wrap items-start justify-between gap-4">
         <div className="max-w-2xl">
-          <select
-            aria-label="Choose journey"
-            className="mb-3 bg-transparent text-xs text-[#7A7870] outline-none"
-            value={pathId}
-            onChange={(event) => {
-              setSelectedId(null)
-              onNavigate('graph', { path_id: event.target.value })
-            }}
-          >
-            {paths.data?.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.title}
-              </option>
-            ))}
-          </select>
           <h1 className="font-display text-3xl font-light">{path.data.title}</h1>
           <p className="mt-2 text-sm text-[#7A7870]">{path.data.description}</p>
           <p className="mt-3 text-xs text-[#5B7A58]">
@@ -379,22 +369,37 @@ export default function CurriculumGraph({
           {nodes.length === 0 ? (
             <Empty title="Add your first topic" />
           ) : view === 'graph' ? (
-            <div className="h-[560px]">
-              <ReactFlow
-                nodes={graph.nodes}
-                edges={graph.edges}
-                fitView
-                nodesDraggable={false}
-                nodesConnectable={false}
-                onNodeClick={(_, node) => setSelectedId(node.id)}
-                onNodeDoubleClick={(_, node) =>
-                  onNavigate('node', { path_id: pathId, node_id: node.id })
-                }
-              >
-                <Background color="#E3E0D8" gap={22} />
-                <Controls showInteractive={false} />
-              </ReactFlow>
-            </div>
+            <>
+              <div className="border-b border-[#F0EEE9] px-5 py-3 text-xs text-[#7A7870]">
+                <p className="font-medium text-[#3D3C38]">
+                  {isSequence ? 'Learning sequence' : 'Topic hierarchy'}
+                </p>
+                <p className="mt-1">
+                  {isSequence
+                    ? 'Dashed arrows follow your topic order. They do not indicate prerequisites.'
+                    : 'Solid lines connect parent topics to their subtopics.'}{' '}
+                  Pan or zoom to explore, or use Outline to see every topic.
+                </p>
+              </div>
+              <div className="h-[560px]" aria-label="Curriculum graph">
+                <ReactFlow
+                  key={pathId}
+                  nodes={graph.nodes}
+                  edges={graph.edges}
+                  fitView
+                  fitViewOptions={{ padding: 0.12, minZoom: 0.8, maxZoom: 1 }}
+                  nodesDraggable={false}
+                  nodesConnectable={false}
+                  onNodeClick={(_, node) => setSelectedId(node.id)}
+                  onNodeDoubleClick={(_, node) =>
+                    onNavigate('node', { path_id: pathId, node_id: node.id })
+                  }
+                >
+                  <Background color="#E3E0D8" gap={22} />
+                  <Controls showInteractive={false} />
+                </ReactFlow>
+              </div>
+            </>
           ) : (
             <div className="divide-y divide-[#F0EEE9]">
               {nodes.map((node, index) => (
@@ -411,7 +416,9 @@ export default function CurriculumGraph({
                   >
                     <p className="text-sm font-medium">{node.title}</p>
                     {node.id === activeNodeId && (
-                      <p className="mt-1 text-xs text-[#4A5FA5]">Last studied</p>
+                      <p className="mt-1 text-xs text-[#4A5FA5]">
+                        {node.status === 'not_started' ? 'Current topic' : 'Last studied'}
+                      </p>
                     )}
                     {node.parent_id && (
                       <p className="mt-1 text-xs text-[#A8A5A0]">

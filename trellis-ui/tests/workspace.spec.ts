@@ -58,7 +58,9 @@ test('source-aware creation sends the selected material and opens the returned c
   })
   await page.goto('/?screen=create')
   await page.getByLabel('Your goal').fill('Learn databases')
-  await page.getByLabel('Database handbook').check()
+  await page.getByRole('button', { name: 'Choose from source library', exact: true }).click()
+  await page.getByRole('checkbox', { name: 'Database handbook', exact: true }).check()
+  await page.getByRole('button', { name: 'Use selected sources', exact: true }).click()
   await page.getByRole('button', { name: 'Build My Learning Path' }).click()
   await expect(page.getByRole('heading', { name: path.title })).toBeVisible()
   expect(body).toEqual({
@@ -216,16 +218,28 @@ test('changing a study selection clears its previous PDF and reports failed save
     if (url === '/api/paths') return route.fulfill({ json: [path] })
     if (url === '/api/notebook/pages')
       return route.fulfill({
-        json: [{ id: 'page-1', path_id: path.id, title: 'Study notes', position: 0, items: [first, second] }],
+        json: [
+          {
+            id: 'page-1',
+            path_id: path.id,
+            title: 'Study notes',
+            position: 0,
+            items: [first, second],
+          },
+        ],
       })
     if (url === '/api/study-sessions')
-      return route.fulfill({ json: [{ id: 'study-1', path_id: path.id, title: 'Review', item_ids: selected }] })
+      return route.fulfill({
+        json: [{ id: 'study-1', path_id: path.id, title: 'Review', item_ids: selected }],
+      })
     if (url === '/api/study-sessions/study-1') {
       const ids = route.request().postDataJSON().item_ids
       if (!ids.includes('note-1'))
         return route.fulfill({ status: 500, json: { detail: 'Could not save selection.' } })
       selected = ids
-      return route.fulfill({ json: { id: 'study-1', path_id: path.id, title: 'Review', item_ids: selected } })
+      return route.fulfill({
+        json: { id: 'study-1', path_id: path.id, title: 'Review', item_ids: selected },
+      })
     }
     if (url === '/api/exports')
       return route.fulfill({
@@ -242,7 +256,7 @@ test('changing a study selection clears its previous PDF and reports failed save
       })
     return route.fulfill({ status: 404, json: { detail: `Unexpected ${url}` } })
   })
-  await page.goto('/?screen=session')
+  await page.goto(`/?screen=session&path=${path.id}`)
   await page.getByRole('button', { name: 'Export PDF', exact: true }).click()
   await expect(page.getByRole('link', { name: 'Download prepared PDF' })).toBeVisible()
   await page.getByRole('checkbox', { name: 'Second note Second material' }).click()

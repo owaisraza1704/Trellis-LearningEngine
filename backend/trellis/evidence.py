@@ -96,7 +96,11 @@ def document_sections(source: Source) -> list[tuple[str, str]]:
         return [(page.extract_text() or "", f"Page {index + 1}") for index, page in enumerate(reader.pages)]
     text = data.decode("utf-8-sig", errors="replace")
     if source.url and ("html" in content_type or "<html" in text[:1000].lower()):
-        extracted = trafilatura.extract(text, include_tables=True, include_comments=False)
+        extracted = trafilatura.extract(
+            text, include_tables=True, include_comments=False,
+            # Microsoft Learn includes an inactive authorization template beside public articles.
+            prune_xpath="//*[@unauthorized-private-section and @hidden]",
+        )
         metadata = trafilatura.extract_metadata(text)
         if metadata and metadata.title:
             source.title = metadata.title[:200]
@@ -122,36 +126,42 @@ def ingestion_error(error: Exception) -> str:
     return "This source could not be parsed or indexed. Try a readable PDF, Markdown, or text file."
 
 
+def prepare_source_chunks(source: Source) -> list[Chunk]:
+    """Read and embed material before replacing an index or saving a discovered page."""
+    sections = document_sections(source)
+    if sum(len(text) for text, _ in sections) > MAX_DOCUMENT_CHARACTERS:
+        raise HTTPException(413, "The source exceeds 500,000 text characters. Split it into smaller files.")
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=1800, chunk_overlap=220, add_start_index=True,
+    )
+    documents = splitter.create_documents(
+        [text for text, _ in sections], [{"section": location} for _, location in sections],
+    )
+    documents = [document for document in documents if document.page_content.strip()]
+    if not documents:
+        raise HTTPException(
+            422, "No extractable text was found. Scanned PDFs need OCR before uploading."
+        )
+    vectors, profile = embed_texts([document.page_content for document in documents])
+    chunks = [Chunk(
+        source_id=source.id, content=document.page_content, position=position,
+        location=f"{document.metadata['section']}, character {document.metadata['start_index'] + 1}",
+        embedding=vector, profile=profile,
+    ) for position, (document, vector) in enumerate(zip(documents, vectors, strict=True))]
+    source.content = "\n\n".join(text for text, _ in sections)
+    source.chunk_count, source.status, source.error = len(chunks), "ready", None
+    return chunks
+
+
 def index_source(session: Session, source: Source) -> None:
     source.status, source.error = "processing", None
     session.add(source)
     session.commit()
     try:
-        sections = document_sections(source)
-        if sum(len(text) for text, _ in sections) > MAX_DOCUMENT_CHARACTERS:
-            raise HTTPException(413, "The source exceeds 500,000 text characters. Split it into smaller files.")
-        splitter = RecursiveCharacterTextSplitter(
-            chunk_size=1800, chunk_overlap=220, add_start_index=True,
-        )
-        documents = splitter.create_documents(
-            [text for text, _ in sections], [{"section": location} for _, location in sections],
-        )
-        documents = [document for document in documents if document.page_content.strip()]
-        if not documents:
-            raise HTTPException(
-                422, "No extractable text was found. Scanned PDFs need OCR before uploading."
-            )
-        vectors, profile = embed_texts([document.page_content for document in documents])
+        chunks = prepare_source_chunks(source)
         # Replace the index only when parsing and all embedding batches have succeeded.
         session.exec(delete(Chunk).where(Chunk.source_id == source.id))
-        for position, (document, vector) in enumerate(zip(documents, vectors, strict=True)):
-            session.add(Chunk(
-                source_id=source.id, content=document.page_content, position=position,
-                location=f"{document.metadata['section']}, character {document.metadata['start_index'] + 1}",
-                embedding=vector, profile=profile,
-            ))
-        source.content = "\n\n".join(text for text, _ in sections)
-        source.chunk_count, source.status, source.error = len(documents), "ready", None
+        session.add_all(chunks)
         session.add(source)
         session.commit()
     except Exception as error:
@@ -227,39 +237,70 @@ def ranked_chunks(session: Session, sources: list[Source], vector: list[float], 
     return [snapshot(chunk, source) for chunk, source, score in rows if score < 0.8]
 
 
-def web_sources(session: Session, query: str, path_id: str | None) -> tuple[list[Source], list[str]]:
+def web_sources(
+    session: Session, query: str, path_id: str | None, *,
+    vector: list[float], profile: str, source_ids: list[str] | None = None,
+) -> tuple[list[Source], list[str]]:
     warnings = []
     ready = []
+    added = 0
     try:
         # Search snippets only discover URLs; they are never used as factual evidence.
         results = DDGS(timeout=15).text(query[:500], max_results=settings.search_max_results)
     except Exception:
         return [], ["Web search is unavailable. Add source URLs or upload relevant documents."]
+    sources = session.exec(select(Source).where(Source.path_id == path_id)).all()
+    if path_id is None:
+        sources = [source for source in sources if source.kind == "web" or source.id in (source_ids or [])]
+    existing = {
+        str(httpx.URL(source.url).copy_with(fragment=None)): source
+        for source in sources if source.url
+    }
+    visited = set()
     for result in results:
         url = result.get("href") or result.get("url")
         if not url:
             continue
         try:
-            public_url(url)
+            parsed, _ = public_url(url)
+            url = str(parsed.copy_with(fragment=None))
         except HTTPException:
             continue
-        source = session.exec(select(Source).where(
-            Source.url == url, Source.path_id == path_id, Source.kind == "web",
-        )).first()
-        if not source:
-            source = Source(
-                path_id=path_id, title=result.get("title", url)[:200], kind="web", url=url,
-            )
-            session.add(source)
-            session.commit()
-        if source.status != "ready":
-            index_source(session, source)
-            session.refresh(source)
-        if source.status == "ready":
-            ready.append(source)
+        if url in visited:
+            continue
+        visited.add(url)
+        source = existing.get(url)
+        if source:
+            if ranked_chunks(session, [source], vector, profile):
+                ready.append(source)
         else:
-            warnings.append(f"A web source could not be indexed: {source.error}")
-        if len(ready) >= 3:
+            source = Source(path_id=path_id, title=(result.get("title") or url)[:200], kind="web", url=url)
+            try:
+                chunks = prepare_source_chunks(source)
+                final_url = str(httpx.URL(source.url).copy_with(fragment=None))
+                source.url = final_url
+                # A redirect can lead to material already supplied by the learner.
+                duplicate = existing.get(final_url)
+                if duplicate:
+                    if duplicate not in ready and ranked_chunks(session, [duplicate], vector, profile):
+                        ready.append(duplicate)
+                else:
+                    with session.begin_nested() as discovery:
+                        session.add(source)
+                        session.flush()
+                        session.add_all(chunks)
+                        session.flush()
+                        if not ranked_chunks(session, [source], vector, profile):
+                            discovery.rollback()
+                            continue
+                    session.commit()
+                    existing[final_url] = source
+                    ready.append(source)
+                    added += 1
+                visited.add(final_url)
+            except Exception as error:
+                warnings.append(f"A web source could not be indexed: {ingestion_error(error)}")
+        if added >= 3:
             break
     return ready, warnings
 
@@ -295,7 +336,7 @@ def retrieve_evidence(
     try:
         vectors, profile = embed_texts([query])
     except HTTPException as error:
-        return {"evidence": [], "warnings": warnings + [str(error.detail)]}
+        return {"evidence": [], "warnings": warnings + [str(error.detail)], "web_search_performed": False}
     stale_ids = outdated_source_ids(session, [source.id for source in supplied], profile)
     for source in supplied:
         if source.id in stale_ids:
@@ -304,19 +345,17 @@ def retrieve_evidence(
                 "been used. Reindex it in Sources."
             )
     primary = ranked_chunks(session, supplied, vectors[0], profile)
-    if primary and not supplement_web:
-        return {"evidence": primary, "warnings": warnings}
-    if supplied and not primary:
-        warnings.append("No usable supplied passages matched this question; available web sources may be used.")
     web = ranked_chunks(session, existing_web, vectors[0], profile)
-    if not web or supplement_web:
-        fetched, failures = web_sources(session, query, path_id)
+    web_search_performed = supplement_web or not (primary or web)
+    if web_search_performed:
+        fetched, failures = web_sources(
+            session, query, path_id, vector=vectors[0], profile=profile, source_ids=source_ids,
+        )
         warnings.extend(failures)
         web = ranked_chunks(session, fetched + existing_web, vectors[0], profile)
-    if supplied and web:
-        warnings.append("This response also uses web sources because the supplied material was unavailable or insufficient.")
     used = {item["id"] for item in primary}
     return {
         "evidence": primary + [item for item in web if item["id"] not in used],
         "warnings": warnings,
+        "web_search_performed": web_search_performed,
     }

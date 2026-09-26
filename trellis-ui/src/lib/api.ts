@@ -1,19 +1,32 @@
+export class ApiError extends Error {
+  constructor(
+    message: string,
+    public status: number,
+  ) {
+    super(message)
+    this.name = 'ApiError'
+  }
+}
+
 export async function api<T>(path: string, method = 'GET', body?: unknown): Promise<T> {
   const form = body instanceof FormData
   const response = await fetch(`/api${path}`, {
     method,
     headers: body && !form ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? (form ? body : JSON.stringify(body)) : undefined,
+  }).catch(() => {
+    throw new ApiError('Could not reach Trellis. Please try again.', 0)
   })
   if (!response.ok) {
     const data = await response.json().catch(() => null)
     const detail = data?.detail
-    throw new Error(
+    throw new ApiError(
       typeof detail === 'string'
         ? detail
         : Array.isArray(detail)
           ? detail.map((item: { msg: string }) => item.msg).join('; ')
-          : `Request failed (${response.status}). Check the local backend.`,
+          : `Request failed (${response.status}). Please try again.`,
+      response.status,
     )
   }
   return response.status === 204 ? (undefined as T) : response.json()
@@ -37,6 +50,10 @@ export interface PathSummary {
   node_count: number
   completed_count: number
   updated_at: string
+  resume?: Location | null
+  last_studied_at?: string | null
+  notebook_item_count?: number
+  notebook_updated_at?: string | null
 }
 export interface PathDetail extends PathSummary {
   input: string
@@ -175,6 +192,8 @@ export interface Activity {
   path_id: string
   node_id?: string
   thread_id?: string
+  interaction_id?: string | null
+  notebook_item_id?: string | null
   kind: string
   label: string
   created_at: string
@@ -195,6 +214,8 @@ export interface Settings {
 export type Screen =
   | 'landing'
   | 'dashboard'
+  | 'journeys'
+  | 'notebooks'
   | 'graph'
   | 'node'
   | 'create'
@@ -203,7 +224,13 @@ export type Screen =
   | 'settings'
   | 'session'
   | 'sources'
-export type Navigate = (screen: Screen, location?: Partial<Location>) => void
+export type Navigate = (
+  screen: Screen,
+  location?: Partial<Location> & {
+    interaction_id?: string | null
+    notebook_item_id?: string | null
+  },
+) => void
 export const date = (value: string) =>
   new Date(value).toLocaleString(undefined, {
     dateStyle: 'medium',
